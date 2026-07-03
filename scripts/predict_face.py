@@ -21,6 +21,7 @@ def main() -> None:
         config.face_engine,
         config.face_model_name,
         config.face_device,
+        model_dir=config.face_model_dir,
     )
     print(json.dumps(recognizer.predict_image(args.image_path).to_dict(), ensure_ascii=False, indent=2))
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import wave
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,13 @@ class Emotion2VecAudioRecognizer:
         model_id: str = "iic/emotion2vec_plus_large",
         hub: str = "ms",
         extract_embedding: bool = False,
+        modelscope_cache_dir: str | Path | None = None,
     ) -> None:
+        if modelscope_cache_dir is not None:
+            cache_dir = Path(modelscope_cache_dir).resolve()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            os.environ["MODELSCOPE_CACHE"] = str(cache_dir)
+
         try:
             from funasr import AutoModel
         except ImportError as exc:

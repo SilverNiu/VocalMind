@@ -17,10 +17,16 @@ class AppConfig:
     face_device: str = "cpu"
     audio_weight: float = 0.45
     face_weight: float = 0.55
+    local_models_dir: Path = PROJECT_ROOT / "local_models"
+    modelscope_cache_dir: Path = PROJECT_ROOT / "local_models" / "modelscope"
+    face_model_dir: Path = PROJECT_ROOT / "local_models" / "face" / "affectnet_emotions"
     emotiefflib_path: Path = PROJECT_ROOT / "EmotiEffLib-main" / "EmotiEffLib-main"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
+        local_models_dir = Path(
+            os.getenv("LOCAL_MODELS_DIR", str(cls.local_models_dir))
+        )
         return cls(
             audio_model_id=os.getenv("AUDIO_MODEL_ID", cls.audio_model_id),
             audio_hub=os.getenv("AUDIO_HUB", cls.audio_hub),
@@ -29,6 +35,16 @@ class AppConfig:
             face_device=os.getenv("FACE_DEVICE", cls.face_device),
             audio_weight=float(os.getenv("AUDIO_WEIGHT", cls.audio_weight)),
             face_weight=float(os.getenv("FACE_WEIGHT", cls.face_weight)),
+            local_models_dir=local_models_dir,
+            modelscope_cache_dir=Path(
+                os.getenv("MODELSCOPE_CACHE", str(local_models_dir / "modelscope"))
+            ),
+            face_model_dir=Path(
+                os.getenv(
+                    "FACE_MODEL_DIR",
+                    str(local_models_dir / "face" / "affectnet_emotions"),
+                )
+            ),
             emotiefflib_path=Path(
                 os.getenv("EMOTIEFFLIB_PATH", str(cls.emotiefflib_path))
             ),

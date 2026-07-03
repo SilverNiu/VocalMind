@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
+from contextlib import contextmanager
 import sys
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 import numpy as np
 
@@ -36,6 +38,7 @@ class EmotiEffFaceRecognizer:
         recognizer: Any | None = None,
         face_detector: FaceDetector | None = None,
         crop_margin: float = 0.15,
+        model_dir: str | Path | None = None,
     ) -> None:
         self.face_detector = face_detector or detect_faces
         self.crop_margin = crop_margin
@@ -51,13 +54,22 @@ class EmotiEffFaceRecognizer:
             sys.path.insert(0, str(library_path))
 
         try:
-            from emotiefflib.facial_analysis import EmotiEffLibRecognizer
+            with _skip_torch_imports(enabled=engine == "onnx"):
+                from emotiefflib import facial_analysis
         except ImportError as exc:
             raise RuntimeError(
                 "Cannot import EmotiEffLib. Check EMOTIEFFLIB_PATH and install its dependencies."
             ) from exc
+        except OSError as exc:
+            raise RuntimeError(
+                "Cannot import EmotiEffLib dependencies. Use FACE_ENGINE=onnx or increase "
+                "Windows virtual memory if Torch is required."
+            ) from exc
 
-        self.recognizer = EmotiEffLibRecognizer(
+        if model_dir is not None:
+            _patch_emotiefflib_model_paths(facial_analysis, Path(model_dir))
+
+        self.recognizer = facial_analysis.EmotiEffLibRecognizer(
             engine=engine,
             model_name=model_name,
             device=device,
@@ -106,6 +118,63 @@ def detect_faces(image: np.ndarray) -> list[FaceBox]:
         minSize=(40, 40),
     )
     return [tuple(map(int, face)) for face in faces]
+
+
+@contextmanager
+def _skip_torch_imports(enabled: bool) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        root_name = name.split(".", 1)[0]
+        if root_name in {"torch", "torchvision"}:
+            raise ImportError("Torch is not required for EmotiEffLib ONNX inference.")
+        return original_import(name, globals, locals, fromlist, level)
+
+    builtins.__import__ = guarded_import
+    try:
+        yield
+    finally:
+        builtins.__import__ = original_import
+
+
+def _patch_emotiefflib_model_paths(facial_analysis: Any, model_dir: Path) -> None:
+    model_dir = model_dir.resolve()
+
+    def get_onnx_path(model_name: str) -> str:
+        return str(_local_model_file(model_dir, model_name, ".onnx", subdir="onnx"))
+
+    def get_torch_path(model_name: str) -> str:
+        return str(_local_model_file(model_dir, model_name, ".pt"))
+
+    facial_analysis.get_model_path_onnx = get_onnx_path
+    facial_analysis.get_model_path_torch = get_torch_path
+
+
+def _local_model_file(
+    model_dir: Path,
+    model_name: str,
+    extension: str,
+    *,
+    subdir: str | None = None,
+) -> Path:
+    candidates = []
+    if subdir:
+        candidates.append(model_dir / subdir / f"{model_name}{extension}")
+    candidates.append(model_dir / f"{model_name}{extension}")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    expected = " or ".join(str(candidate) for candidate in candidates)
+    raise RuntimeError(
+        f"Local EmotiEffLib model not found. Expected {expected}. "
+        "Set FACE_MODEL_DIR to the local model directory."
+    )
 
 
 def load_rgb_image(image_path: str | Path) -> np.ndarray:

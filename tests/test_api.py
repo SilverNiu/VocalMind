@@ -67,7 +67,7 @@ def test_audio_endpoint_reuses_cached_recognizer(monkeypatch):
     class FakeAudioRecognizer:
         instances = 0
 
-        def __init__(self, model_id, hub):
+        def __init__(self, model_id, hub, **kwargs):
             FakeAudioRecognizer.instances += 1
             self.model_id = model_id
             self.hub = hub

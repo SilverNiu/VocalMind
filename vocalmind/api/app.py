@@ -36,7 +36,11 @@ async def vocalmind_error_handler(_, exc: VocalMindError) -> JSONResponse:
 @lru_cache(maxsize=1)
 def get_audio_recognizer() -> Emotion2VecAudioRecognizer:
     try:
-        return Emotion2VecAudioRecognizer(config.audio_model_id, config.audio_hub)
+        return Emotion2VecAudioRecognizer(
+            config.audio_model_id,
+            config.audio_hub,
+            modelscope_cache_dir=config.modelscope_cache_dir,
+        )
     except (ImportError, RuntimeError) as exc:
         raise ModelUnavailableError(
             str(exc),
@@ -52,6 +56,7 @@ def get_face_recognizer() -> EmotiEffFaceRecognizer:
             config.face_engine,
             config.face_model_name,
             config.face_device,
+            model_dir=config.face_model_dir,
         )
     except (ImportError, RuntimeError) as exc:
         raise ModelUnavailableError(

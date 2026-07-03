@@ -3,7 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vocalmind.face.emotieff_adapter import EmotiEffFaceRecognizer, NoFaceDetectedError
+from vocalmind.face.emotieff_adapter import (
+    EmotiEffFaceRecognizer,
+    NoFaceDetectedError,
+    _skip_torch_imports,
+)
 
 
 class FakeEmotiEffRecognizer:
@@ -43,3 +47,9 @@ def test_predict_array_raises_clear_error_when_no_face_is_detected():
         recognizer.predict_array(np.zeros((64, 64, 3), dtype=np.uint8))
 
     assert exc_info.value.code == "face_not_detected"
+
+
+def test_skip_torch_imports_turns_torch_import_into_import_error():
+    with _skip_torch_imports(enabled=True):
+        with pytest.raises(ImportError):
+            __import__("torch")

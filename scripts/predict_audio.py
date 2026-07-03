@@ -16,7 +16,11 @@ def main() -> None:
     args = parser.parse_args()
 
     config = AppConfig.from_env()
-    recognizer = Emotion2VecAudioRecognizer(config.audio_model_id, config.audio_hub)
+    recognizer = Emotion2VecAudioRecognizer(
+        config.audio_model_id,
+        config.audio_hub,
+        modelscope_cache_dir=config.modelscope_cache_dir,
+    )
     print(json.dumps(recognizer.predict_file(args.wav_path).to_dict(), ensure_ascii=False, indent=2))
 
 

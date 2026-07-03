@@ -28,6 +28,7 @@ temp/
 # Local datasets and recordings
 data/
 datasets/
+OMG-Emotion/
 recordings/
 *.ipynb
 *.jpg
@@ -45,6 +46,8 @@ recordings/
 
 # Model weights and accelerator artifacts.
 # Team members should keep these locally instead of committing them.
+local_models/**
+!local_models/README.md
 *.pt
 *.pth
 *.ckpt
