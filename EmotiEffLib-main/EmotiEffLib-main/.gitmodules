@@ -1,0 +1,12 @@
+[submodule "emotieffcpplib/3rdparty/opencv-mtcnn"]
+	path = emotieffcpplib/3rdparty/opencv-mtcnn
+	url = https://github.com/egcode/opencv-mtcnn.git
+[submodule "emotieffcpplib/3rdparty/xtensor"]
+	path = emotieffcpplib/3rdparty/xtensor
+	url = https://github.com/xtensor-stack/xtensor.git
+[submodule "emotieffcpplib/3rdparty/xtl"]
+	path = emotieffcpplib/3rdparty/xtl
+	url = https://github.com/xtensor-stack/xtl.git
+[submodule "docs/tutorials/cpp/json"]
+	path = docs/tutorials/cpp/json
+	url = https://github.com/nlohmann/json.git

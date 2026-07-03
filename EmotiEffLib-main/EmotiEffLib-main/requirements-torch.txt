@@ -1,0 +1,3 @@
+timm==0.9.*
+torch
+torchvision

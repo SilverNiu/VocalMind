@@ -1,0 +1,10 @@
+*__pycache__*
+*ipynb_checkpoints*
+tests/data
+tests/data.tar.gz
+build
+dist
+*egg-info
+.cache
+models/emotieffcpplib_prepared_models
+docs/html

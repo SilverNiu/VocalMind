@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# Runtime outputs
+outputs/
+runs/
+logs/
+tmp/
+temp/
+
+# Local datasets and recordings
+data/
+datasets/
+recordings/
+*.ipynb
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.mp4
+*.avi
+*.mov
+
+# Model weights and accelerator artifacts.
+# Team members should keep these locally instead of committing them.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.pb
+*.h5
+*.tflite
+*.ptl
+*.bin
+
+# Large experiment artifacts
+*.npy
+*.npz
+*.pkl
+*.pickle
+
+# Trim vendored upstream projects to the Python baseline surface.
+EmotiEffLib-main/EmotiEffLib-main/.binder/
+EmotiEffLib-main/EmotiEffLib-main/.github/
+EmotiEffLib-main/EmotiEffLib-main/docs/
+EmotiEffLib-main/EmotiEffLib-main/emotieffcpplib/
+EmotiEffLib-main/EmotiEffLib-main/tests/
+EmotiEffLib-main/EmotiEffLib-main/training_and_examples/
+
+# OS
+Thumbs.db
+.DS_Store
