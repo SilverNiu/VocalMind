@@ -1,3 +1,3 @@
-from vocalmind.face.emotieff_adapter import EmotiEffFaceRecognizer
+from vocalmind.face.emotieff_adapter import EmotiEffFaceRecognizer, NoFaceDetectedError
 
-__all__ = ["EmotiEffFaceRecognizer"]
+__all__ = ["EmotiEffFaceRecognizer", "NoFaceDetectedError"]

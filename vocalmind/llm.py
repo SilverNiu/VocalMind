@@ -29,6 +29,17 @@ def build_companion_messages(
     ]
 
 
+def local_fallback_reply(user_text: str, emotion: EmotionPrediction) -> str:
+    label = emotion.label or "unknown"
+    return (
+        "I can't provide a medical diagnosis, but I can stay with you and help "
+        f"sort through this. The current emotion signal looks {label}; if that "
+        "matches how you feel, try naming the biggest pressure point, taking one "
+        "small next step, and reaching out to someone you trust if the feeling "
+        "keeps weighing on you."
+    )
+
+
 class CompanionLLM:
     def __init__(
         self,
@@ -36,7 +47,12 @@ class CompanionLLM:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        self.model = model or os.getenv("LLM_MODEL", "gpt-4.1-mini")
+        self.model = (
+            model
+            or os.getenv("LLM_MODEL_ID")
+            or os.getenv("LLM_MODEL")
+            or "gpt-4.1-mini"
+        )
         self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
         self.base_url = base_url or os.getenv("LLM_BASE_URL")
 
@@ -57,3 +73,24 @@ class CompanionLLM:
             messages=build_companion_messages(user_text, emotion),
         )
         return response.choices[0].message.content or ""
+
+    def respond(self, user_text: str, emotion: EmotionPrediction) -> tuple[str, dict[str, object]]:
+        if not self.api_key:
+            return local_fallback_reply(user_text, emotion), {
+                "mode": "fallback",
+                "warning": {
+                    "code": "llm_key_missing",
+                    "message": "LLM_API_KEY/OPENAI_API_KEY is not set; using local fallback reply.",
+                },
+            }
+
+        try:
+            return self.chat(user_text, emotion), {"mode": "remote"}
+        except RuntimeError as exc:
+            return local_fallback_reply(user_text, emotion), {
+                "mode": "fallback",
+                "warning": {
+                    "code": "llm_unavailable",
+                    "message": str(exc),
+                },
+            }
