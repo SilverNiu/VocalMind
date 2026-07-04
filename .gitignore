@@ -30,6 +30,8 @@ data/
 datasets/
 OMG-Emotion/
 recordings/
+!frontend/src/data/
+!frontend/src/data/**
 *.ipynb
 *.jpg
 *.jpeg

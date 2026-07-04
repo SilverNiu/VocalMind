@@ -261,6 +261,19 @@ cd /root/autodl-tmp/VocalMind
 CORS_ALLOW_ORIGINS="*" PORT=8000 bash scripts/deploy_autodl_backend.sh
 ```
 
+前后端一体部署使用：
+
+```bash
+cd /root/autodl-tmp
+bash VocalMind/scripts/deploy_full_stack.sh
+```
+
+`deploy_full_stack.sh` 会拉取 `SilverNiu/VocalMind`，执行 `frontend` 的 `npm ci` 和 `npm run build`，再启动 FastAPI。构建后的 `frontend/dist` 由后端同一个服务托管；如需覆盖前端请求地址，可设置 `FRONTEND_API_BASE`：
+
+```bash
+FRONTEND_API_BASE="http://101.35.234.4:18080" PORT=8000 bash scripts/deploy_full_stack.sh
+```
+
 ### Nginx 反代 + SSH 反向隧道
 
 当前推荐链路：

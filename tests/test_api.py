@@ -52,6 +52,40 @@ def test_health_endpoint_allows_browser_frontend_origin():
     assert response.headers["access-control-allow-origin"] == "*"
 
 
+def test_frontend_dist_is_served_as_integrated_spa(monkeypatch, tmp_path):
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text("<div id=\"root\"></div>", encoding="utf-8")
+    (assets_dir / "app.js").write_text("console.log('vocalmind')", encoding="utf-8")
+    monkeypatch.setattr(app_module, "FRONTEND_DIST_DIR", dist_dir)
+    client = TestClient(app)
+
+    root_response = client.get("/")
+    asset_response = client.get("/assets/app.js")
+    route_response = client.get("/minicpm")
+
+    assert root_response.status_code == 200
+    assert "<div id=\"root\"></div>" in root_response.text
+    assert asset_response.status_code == 200
+    assert "vocalmind" in asset_response.text
+    assert route_response.status_code == 200
+    assert "<div id=\"root\"></div>" in route_response.text
+
+
+def test_frontend_spa_fallback_does_not_hide_api_404(monkeypatch, tmp_path):
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "index.html").write_text("<div id=\"root\"></div>", encoding="utf-8")
+    monkeypatch.setattr(app_module, "FRONTEND_DIST_DIR", dist_dir)
+    client = TestClient(app)
+
+    response = client.get("/voice/not-a-real-route")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not found"
+
+
 def test_minicpm_demo_page_is_served():
     client = TestClient(app)
 

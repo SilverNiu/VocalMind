@@ -6,6 +6,7 @@ import binascii
 from contextlib import suppress
 from functools import lru_cache
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -21,9 +22,9 @@ from vocalmind.llm import CompanionLLM
 from vocalmind.schema import EmotionPrediction
 
 try:
-    from fastapi import FastAPI, File, Form, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 except ImportError as exc:  # pragma: no cover - import-time guidance for optional dependency
     raise RuntimeError(
         "FastAPI service dependencies are missing. Install requirements-api.txt."
@@ -32,6 +33,9 @@ except ImportError as exc:  # pragma: no cover - import-time guidance for option
 
 app = FastAPI(title="VocalMind Emotion Companion Baseline")
 config = AppConfig.from_env()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIST_DIR = Path(os.getenv("FRONTEND_DIST_DIR", PROJECT_ROOT / "frontend" / "dist"))
+FRONTEND_RESERVED_PREFIXES = {"health", "demo", "voice", "emotion", "companion", "ws"}
 MINICPM_DEMO_PATH = Path(__file__).resolve().parent / "static" / "minicpm_voice.html"
 MINICPM_INPUT_SAMPLE_RATE = 16000
 MINICPM_OUTPUT_SAMPLE_RATE = 24000
@@ -597,3 +601,41 @@ async def _safe_client_send_json(client_ws: WebSocket, payload: dict[str, object
 async def _safe_client_close(client_ws: WebSocket, code: int = 1000) -> None:
     with suppress(Exception):
         await client_ws.close(code=code)
+
+
+def _frontend_file_response(path: str) -> FileResponse:
+    index_path = FRONTEND_DIST_DIR / "index.html"
+    if not index_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Frontend build not found. Run npm run build in frontend/ before serving the integrated app.",
+        )
+
+    if path:
+        requested_path = (FRONTEND_DIST_DIR / path).resolve()
+        frontend_root = FRONTEND_DIST_DIR.resolve()
+        if _is_path_inside(requested_path, frontend_root) and requested_path.is_file():
+            return FileResponse(requested_path)
+
+    return FileResponse(index_path, media_type="text/html")
+
+
+def _is_path_inside(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+@app.get("/", include_in_schema=False)
+def frontend_root() -> FileResponse:
+    return _frontend_file_response("")
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def frontend_spa(path: str) -> FileResponse:
+    first_segment = path.split("/", 1)[0]
+    if first_segment in FRONTEND_RESERVED_PREFIXES:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _frontend_file_response(path)

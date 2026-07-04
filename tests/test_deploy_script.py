@@ -39,6 +39,20 @@ def test_autodl_deploy_script_contains_required_backend_steps():
     assert "MINICPM_SYSTEM_PROMPT" in script
 
 
+def test_full_stack_deploy_script_builds_frontend_before_backend_start():
+    script = Path("scripts/deploy_full_stack.sh").read_text(encoding="utf-8")
+
+    assert "https://github.com/SilverNiu/VocalMind.git" in script
+    assert "FRONTEND_DIR=\"${FRONTEND_DIR:-${PROJECT_DIR}/frontend}\"" in script
+    assert "VITE_API_BASE=\"$FRONTEND_API_BASE\" npm run build" in script
+    assert "npm ci" in script
+    assert "dist/index.html" in script
+    assert "deploy_autodl_backend.sh" in script
+    assert "demo_video_overlay.py" not in script
+    assert "demo_service_overlay.py" not in script
+    assert "sounddevice" not in script
+
+
 def test_nginx_reverse_proxy_script_matches_current_public_route():
     script = Path("scripts/setup_nginx_reverse_proxy.sh").read_text(encoding="utf-8")
 
