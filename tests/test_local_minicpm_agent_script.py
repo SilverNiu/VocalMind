@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ from scripts.local_minicpm_agent import (
     _receive_minicpm_messages,
     append_emotion_audio_chunk,
     build_input_append_message,
+    build_minicpm_realtime_ws_url,
     build_minicpm_ws_url,
     build_parser,
     build_run_kwargs,
@@ -35,6 +37,7 @@ def test_local_minicpm_agent_defaults_to_audio_mode_with_camera_emotion_sampling
     assert kwargs["emotion_sampling"] is True
     assert kwargs["emotion_every_seconds"] == 3.0
     assert kwargs["emotion_audio_segment_seconds"] == 3.0
+    assert kwargs["minicpm_realtime_url"] == "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
 
 
 def test_audio_mode_keeps_camera_for_server_emotion_but_not_minicpm_video():
@@ -72,6 +75,16 @@ def test_build_minicpm_ws_url_uses_video_mode_query():
     assert (
         build_minicpm_ws_url("https://app.example.com", "/voice/minicpm?mode=audio", mode="video")
         == "wss://app.example.com/voice/minicpm?mode=video"
+    )
+
+
+def test_build_minicpm_realtime_ws_url_uses_official_url_directly():
+    assert (
+        build_minicpm_realtime_ws_url(
+            "wss://minicpmo45.modelbest.cn/v1/realtime?mode=video",
+            mode="audio",
+        )
+        == "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
     )
 
 
@@ -129,21 +142,63 @@ def test_receive_minicpm_messages_stops_after_proxy_error():
                 return '{"type":"proxy.error","detail":"upstream 404"}'
             raise AssertionError("receiver should stop after proxy.error")
 
-    ready = __import__("asyncio").Event()
-    stats = {"errors": []}
-
-    __import__("asyncio").run(
-        _receive_minicpm_messages(
+    async def run_receiver():
+        ready = asyncio.Event()
+        stats = {"errors": []}
+        await _receive_minicpm_messages(
             FakeWebSocket(),
             ready=ready,
             stats=stats,
             playback=False,
             output_sample_rate=24000,
         )
-    )
+        return ready, stats
+
+    ready, stats = asyncio.run(run_receiver())
 
     assert ready.is_set()
     assert stats["errors"] == ["upstream 404"]
+
+
+def test_receive_minicpm_messages_handles_direct_session_events():
+    class FakeWebSocket:
+        def __init__(self):
+            self.calls = 0
+            self.sent = []
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"type":"session.queue_done"}'
+            if self.calls == 2:
+                return '{"type":"session.created"}'
+            raise StopAsyncIteration
+
+        async def send(self, message):
+            self.sent.append(message)
+
+    async def run_receiver():
+        ws = FakeWebSocket()
+        ready = asyncio.Event()
+        stats = {"errors": [], "session_init_sent": False}
+        await _receive_minicpm_messages(
+            ws,
+            ready=ready,
+            stats=stats,
+            playback=False,
+            output_sample_rate=24000,
+            session_init={"type": "session.init", "payload": {"system_prompt": "hello"}},
+        )
+        return ws, ready, stats
+
+    ws, ready, stats = asyncio.run(run_receiver())
+
+    assert ready.is_set()
+    assert stats["session_init_sent"] is True
+    assert ws.sent == ['{"type": "session.init", "payload": {"system_prompt": "hello"}}']
 
 
 def test_agent_requirements_include_websocket_proxy_dependency():

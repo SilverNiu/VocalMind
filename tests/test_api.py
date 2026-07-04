@@ -108,6 +108,11 @@ def test_minicpm_voice_config_exposes_frontend_contract_without_key():
     assert body["websocket_path"] == "/voice/minicpm"
     assert body["local_agent"]["websocket_path"] == "/voice/minicpm?mode=audio"
     assert body["local_agent"]["mode"] == "audio"
+    assert body["local_agent"]["minicpm_connection"] == "direct"
+    assert (
+        body["local_agent"]["minicpm_realtime_url"]
+        == "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
+    )
     assert body["local_agent"]["emotion_sampling"]["enabled"] is True
     assert body["local_agent"]["emotion_sampling"]["endpoint"] == "/companion/respond"
     assert body["local_agent"]["emotion_sampling"]["inference"] == "server"

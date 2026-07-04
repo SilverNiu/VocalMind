@@ -39,6 +39,8 @@ def test_build_agent_command_uses_discovered_project_root():
         "http://101.35.234.4:18080",
         "--mode",
         "audio",
+        "--minicpm-realtime-url",
+        "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio",
     ]
 
 

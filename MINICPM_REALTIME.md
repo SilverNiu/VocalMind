@@ -2,7 +2,7 @@
 
 项目提供两条 MiniCPM Realtime 链路：
 
-- 推荐：`scripts/local_minicpm_agent.py` 由本机 Python 进程采集摄像头和麦克风；MiniCPM 默认通过 `WS /voice/minicpm?mode=audio` 发送麦克风音频，摄像头 JPEG 和一段 WAV 通过 HTTP `/companion/respond` 发送给 AutoDL 的 face/audio 情绪模型。
+- 推荐：`scripts/local_minicpm_agent.py` 由本机 Python 进程采集摄像头和麦克风；MiniCPM 默认直连官方 `wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio`，摄像头 JPEG 和一段 WAV 通过 HTTP `/companion/respond` 发送给 AutoDL 的 face/audio 情绪模型。
 - 兼容：`GET /demo/minicpm` 仍保留浏览器语音 demo，走 `WS /voice/minicpm` 的 `mode=audio`。
 - `GET /voice/minicpm/config`：前端读取 WebSocket 路径、音频格式和本地 Agent contract。
 
@@ -44,12 +44,10 @@ conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://
 wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio
 ```
 
-本地 Agent 默认请求 `/voice/minicpm?mode=audio`，避免上游 MiniCPM video WebSocket 不可用时返回 404。摄像头帧仍会在本地采样，但只通过 HTTP `/companion/respond` 发送给 AutoDL 做 face 情绪推理。
+本地 Agent 默认不再请求 AutoDL 的 `/voice/minicpm` 代理，而是直接连接官方 MiniCPM Realtime WebSocket，避免云端反代或后端代理返回 404。摄像头帧仍会在本地采样，但只通过 HTTP `/companion/respond` 发送给 AutoDL 做 face 情绪推理。
 
-部署脚本会把 `MINICPM_REALTIME_URL`、`MINICPM_API_KEY` 和 `MINICPM_SYSTEM_PROMPT`
-写入 `/root/autodl-tmp/VocalMind/.env.autodl`。公网经过云服务器 Nginx 时，
-请使用当前仓库的 `scripts/setup_nginx_reverse_proxy.sh`，它已经为 `/voice/minicpm`
-配置了 WebSocket upgrade 头和较长的读写超时。
+部署脚本仍会把 `MINICPM_REALTIME_URL`、`MINICPM_API_KEY` 和 `MINICPM_SYSTEM_PROMPT`
+写入 `/root/autodl-tmp/VocalMind/.env.autodl`，用于兼容浏览器 demo 或后端代理链路。主应用本地 Agent 默认在 Windows 本机直连 MiniCPM，公网 Nginx 只需要继续转发 `/companion/respond` 等 HTTP 情绪接口。
 
 官方公开文档当前没有要求必须提供 API key；如果你的账号、网关或后续服务策略需要鉴权，可以在 `.env` 或终端环境变量中配置：
 

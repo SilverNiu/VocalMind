@@ -23,6 +23,8 @@ export interface MiniCpmLocalLauncherContract {
 export interface MiniCpmLocalAgentContract {
   websocket_path: string;
   mode: 'audio' | 'video';
+  minicpm_connection?: 'direct' | 'server_proxy';
+  minicpm_realtime_url?: string;
   script: string;
   description: string;
   launcher?: MiniCpmLocalLauncherContract;
@@ -65,6 +67,7 @@ export async function fetchMiniCpmConfig(
 export interface MiniCpmLauncherStartPayload {
   api_base: string;
   mode: 'audio' | 'video';
+  minicpm_realtime_url?: string;
 }
 
 export interface MiniCpmLauncherStartResponse {

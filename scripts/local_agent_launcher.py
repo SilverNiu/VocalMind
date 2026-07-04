@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.demo_service_overlay import DEFAULT_API_BASE  # noqa: E402
+from vocalmind.config import DEFAULT_MINICPM_REALTIME_URL  # noqa: E402
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -73,8 +74,9 @@ def build_agent_command(
     python_executable: str,
     api_base: str,
     mode: str = DEFAULT_MODE,
+    minicpm_realtime_url: str | None = DEFAULT_MINICPM_REALTIME_URL,
 ) -> list[str]:
-    return [
+    command = [
         python_executable,
         str(project_root / AGENT_SCRIPT),
         "--api-base",
@@ -82,6 +84,9 @@ def build_agent_command(
         "--mode",
         mode,
     ]
+    if minicpm_realtime_url:
+        command.extend(["--minicpm-realtime-url", minicpm_realtime_url])
+    return command
 
 
 def default_spawn(command: list[str], cwd: Path) -> subprocess.Popen:
@@ -112,6 +117,7 @@ class LauncherState:
         project_root: Path,
         api_base: str = DEFAULT_API_BASE,
         mode: str = DEFAULT_MODE,
+        minicpm_realtime_url: str | None = DEFAULT_MINICPM_REALTIME_URL,
     ) -> dict[str, object]:
         with self.lock:
             if self.is_running():
@@ -128,6 +134,7 @@ class LauncherState:
                 python_executable=self.python_executable,
                 api_base=api_base,
                 mode=mode,
+                minicpm_realtime_url=minicpm_realtime_url,
             )
             self.process = self.spawn(command, project_root)
             return {
@@ -176,6 +183,9 @@ def make_handler(state: LauncherState, project_root: Path):
                         project_root=project_root,
                         api_base=str(payload.get("api_base") or DEFAULT_API_BASE),
                         mode=str(payload.get("mode") or DEFAULT_MODE),
+                        minicpm_realtime_url=str(
+                            payload.get("minicpm_realtime_url") or DEFAULT_MINICPM_REALTIME_URL
+                        ),
                     )
                     self._send_json(result)
                     return

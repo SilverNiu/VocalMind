@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -30,6 +31,10 @@ from scripts.demo_service_overlay import (  # noqa: E402
     pcm_float32_to_wav_bytes,
     post_companion,
 )
+from vocalmind.config import (  # noqa: E402
+    DEFAULT_MINICPM_REALTIME_URL,
+    DEFAULT_MINICPM_SYSTEM_PROMPT,
+)
 
 
 DEFAULT_MINICPM_WS_PATH = "/voice/minicpm"
@@ -46,13 +51,35 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Run the VocalMind local MiniCPM agent. The agent captures local "
             "microphone audio and optional camera frames, then sends input.append "
-            "messages to the VocalMind MiniCPM proxy and sampled media to the "
-            "server-side emotion models."
+            "messages directly to MiniCPM Realtime by default and sampled media "
+            "to the server-side emotion models."
         )
     )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--websocket-path", default=DEFAULT_MINICPM_WS_PATH)
     parser.add_argument("--mode", choices=["audio", "video"], default=DEFAULT_MINICPM_MODE)
+    parser.add_argument(
+        "--minicpm-realtime-url",
+        default=os.getenv("MINICPM_REALTIME_URL", DEFAULT_MINICPM_REALTIME_URL),
+        help=(
+            "Official MiniCPM realtime WebSocket URL. Set to an empty string with "
+            "--use-server-minicpm-proxy to use the AutoDL /voice/minicpm proxy."
+        ),
+    )
+    parser.add_argument(
+        "--minicpm-api-key",
+        default=os.getenv("MINICPM_API_KEY") or None,
+        help="Optional MiniCPM API key for direct official WebSocket access.",
+    )
+    parser.add_argument(
+        "--minicpm-system-prompt",
+        default=os.getenv("MINICPM_SYSTEM_PROMPT", DEFAULT_MINICPM_SYSTEM_PROMPT),
+    )
+    parser.add_argument(
+        "--use-server-minicpm-proxy",
+        action="store_true",
+        help="Use api-base + websocket-path instead of direct official MiniCPM WebSocket.",
+    )
     parser.add_argument("--camera-index", type=int, default=DEFAULT_CAMERA_INDEX)
     parser.add_argument("--no-camera", action="store_true")
     parser.add_argument("--camera-fps", type=float, default=DEFAULT_VIDEO_FPS)
@@ -101,6 +128,11 @@ def build_run_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "api_base": args.api_base,
         "websocket_path": args.websocket_path,
         "mode": args.mode,
+        "minicpm_realtime_url": None
+        if args.use_server_minicpm_proxy
+        else (args.minicpm_realtime_url or None),
+        "minicpm_api_key": args.minicpm_api_key,
+        "minicpm_system_prompt": args.minicpm_system_prompt,
         "camera_index": args.camera_index,
         "use_camera": not args.no_camera,
         "camera_fps": args.camera_fps,
@@ -140,6 +172,41 @@ def build_minicpm_ws_url(
         query.append(("mode", mode))
 
     return urlunsplit((scheme, base.netloc, path_split.path, urlencode(query), ""))
+
+
+def build_minicpm_realtime_ws_url(
+    realtime_url: str,
+    *,
+    mode: str | None = DEFAULT_MINICPM_MODE,
+) -> str:
+    parsed = urlsplit(realtime_url.rstrip("/"))
+    if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.netloc:
+        raise ValueError(f"Invalid MiniCPM realtime URL: {realtime_url!r}")
+
+    scheme = {"http": "ws", "https": "wss"}.get(parsed.scheme, parsed.scheme)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if mode:
+        query = [(key, value) for key, value in query if key.lower() != "mode"]
+        query.append(("mode", mode))
+    return urlunsplit((scheme, parsed.netloc, parsed.path, urlencode(query), ""))
+
+
+def build_minicpm_headers(api_key: str | None) -> dict[str, str]:
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def build_minicpm_session_init_message(system_prompt: str) -> dict[str, object]:
+    return {
+        "type": "session.init",
+        "payload": {
+            "system_prompt": system_prompt,
+            "config": {
+                "length_penalty": 1.1,
+            },
+        },
+    }
 
 
 def float32_samples_to_base64(samples: Any) -> str:
@@ -300,11 +367,30 @@ async def post_emotion_sample(
     stats["last_emotion_response"] = extract_predictions(body)
 
 
+def connect_minicpm_websocket(websockets: Any, ws_url: str, *, headers: dict[str, str]) -> Any:
+    kwargs: dict[str, Any] = {
+        "max_size": None,
+        "ping_interval": 20,
+        "ping_timeout": 20,
+    }
+    if headers:
+        kwargs["additional_headers"] = headers
+    try:
+        return websockets.connect(ws_url, **kwargs)
+    except TypeError:
+        if "additional_headers" in kwargs:
+            kwargs["extra_headers"] = kwargs.pop("additional_headers")
+        return websockets.connect(ws_url, **kwargs)
+
+
 async def run_local_minicpm_agent(
     *,
     api_base: str,
     websocket_path: str = DEFAULT_MINICPM_WS_PATH,
     mode: str = DEFAULT_MINICPM_MODE,
+    minicpm_realtime_url: str | None = DEFAULT_MINICPM_REALTIME_URL,
+    minicpm_api_key: str | None = None,
+    minicpm_system_prompt: str = DEFAULT_MINICPM_SYSTEM_PROMPT,
     camera_index: int = DEFAULT_CAMERA_INDEX,
     use_camera: bool = True,
     camera_fps: float = DEFAULT_VIDEO_FPS,
@@ -332,7 +418,18 @@ async def run_local_minicpm_agent(
             "Install it with: python -m pip install websockets"
         ) from exc
 
-    ws_url = build_minicpm_ws_url(api_base, websocket_path, mode=mode)
+    direct_minicpm = bool(minicpm_realtime_url)
+    ws_url = (
+        build_minicpm_realtime_ws_url(minicpm_realtime_url, mode=mode)
+        if minicpm_realtime_url
+        else build_minicpm_ws_url(api_base, websocket_path, mode=mode)
+    )
+    ws_headers = build_minicpm_headers(minicpm_api_key) if direct_minicpm else {}
+    session_init = (
+        build_minicpm_session_init_message(minicpm_system_prompt)
+        if direct_minicpm
+        else None
+    )
     camera = (
         open_camera_capture(camera_index)
         if should_open_camera_capture(
@@ -346,6 +443,7 @@ async def run_local_minicpm_agent(
         "ok": True,
         "api_base": api_base,
         "websocket_url": ws_url,
+        "minicpm_connection": "direct" if direct_minicpm else "server_proxy",
         "mode": mode,
         "camera": camera_index if camera is not None else None,
         "audio_chunks_sent": 0,
@@ -357,11 +455,12 @@ async def run_local_minicpm_agent(
         "emotion_requests_sent": 0,
         "emotion_errors": [],
         "last_emotion_response": None,
+        "session_init_sent": False,
         "errors": [],
     }
 
     try:
-        async with websockets.connect(ws_url, max_size=None, ping_interval=20, ping_timeout=20) as ws:
+        async with connect_minicpm_websocket(websockets, ws_url, headers=ws_headers) as ws:
             ready = asyncio.Event()
             receive_task = asyncio.create_task(
                 _receive_minicpm_messages(
@@ -370,6 +469,7 @@ async def run_local_minicpm_agent(
                     stats=stats,
                     playback=playback,
                     output_sample_rate=output_sample_rate,
+                    session_init=session_init,
                 )
             )
             await asyncio.wait_for(ready.wait(), timeout=ready_timeout_seconds)
@@ -449,7 +549,8 @@ async def run_local_minicpm_agent(
                     task.add_done_callback(emotion_tasks.discard)
                     next_emotion_time = now + max(emotion_every_seconds, 0.001)
 
-            await ws.send(json.dumps({"type": "proxy.close"}))
+            close_message = {"type": "session.close"} if direct_minicpm else {"type": "proxy.close"}
+            await ws.send(json.dumps(close_message))
             if emotion_tasks:
                 await asyncio.gather(*emotion_tasks, return_exceptions=True)
             receive_task.cancel()
@@ -469,6 +570,7 @@ async def _receive_minicpm_messages(
     stats: dict[str, Any],
     playback: bool,
     output_sample_rate: int,
+    session_init: dict[str, object] | None = None,
 ) -> None:
     async for raw in ws:
         if isinstance(raw, bytes):
@@ -493,6 +595,16 @@ async def _receive_minicpm_messages(
             return
         if event_type == "session.queued":
             print("MiniCPM session queued.")
+            continue
+        if event_type == "session.queue_done":
+            if session_init is not None:
+                await ws.send(json.dumps(session_init, ensure_ascii=False))
+                stats["session_init_sent"] = True
+                ready.set()
+            continue
+        if event_type == "session.created":
+            ready.set()
+            print("MiniCPM direct session ready.")
             continue
 
         if event_type == "response.output.delta":

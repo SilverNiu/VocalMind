@@ -56,7 +56,10 @@ export function useMiniCpmVoice() {
       const mode = localAgent?.mode || 'audio';
       const script = localAgent?.script || 'scripts/local_minicpm_agent.py';
       const websocketPath = localAgent?.websocket_path || `${nextConfig.websocket_path}?mode=${mode}`;
-      const command = `python ${script} --api-base ${apiBase} --websocket-path "${websocketPath}" --mode ${mode}`;
+      const directRealtimeUrl = localAgent?.minicpm_realtime_url;
+      const command = directRealtimeUrl
+        ? `python ${script} --api-base ${apiBase} --mode ${mode} --minicpm-realtime-url "${directRealtimeUrl}"`
+        : `python ${script} --api-base ${apiBase} --websocket-path "${websocketPath}" --mode ${mode}`;
       const launcher = localAgent?.launcher;
       const launcherCommand = `python ${launcher?.script || 'scripts/local_agent_launcher.py'}`;
 
@@ -66,6 +69,7 @@ export function useMiniCpmVoice() {
           const launcherResult = await startMiniCpmLocalAgent(launcher, {
             api_base: apiBase,
             mode,
+            minicpm_realtime_url: localAgent?.minicpm_realtime_url,
           });
           setAgentCommand(null);
           setInputLevel(1);

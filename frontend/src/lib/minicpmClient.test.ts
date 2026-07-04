@@ -62,7 +62,11 @@ describe('local launcher helpers', () => {
 
     const result = await startMiniCpmLocalAgent(
       launcher,
-      { api_base: 'http://101.35.234.4:18080', mode: 'audio' },
+      {
+        api_base: 'http://101.35.234.4:18080',
+        mode: 'audio',
+        minicpm_realtime_url: 'wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio',
+      },
       fetchImpl as typeof fetch
     );
 
@@ -71,7 +75,11 @@ describe('local launcher helpers', () => {
     assert.equal(requests[0].init?.method, 'POST');
     assert.equal(
       requests[0].init?.body,
-      JSON.stringify({ api_base: 'http://101.35.234.4:18080', mode: 'audio' })
+      JSON.stringify({
+        api_base: 'http://101.35.234.4:18080',
+        mode: 'audio',
+        minicpm_realtime_url: 'wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio',
+      })
     );
   });
 });

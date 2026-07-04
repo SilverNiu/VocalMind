@@ -572,7 +572,7 @@ conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35
 
 ### MiniCPM 本地摄像头 + 麦克风 Agent
 
-MiniCPM Realtime 推荐走本地 Agent：浏览器主应用优先调用本机 launcher 自动启动 Agent，launcher 不在线时才展示启动命令，不再调用 `getUserMedia`。本地 Python 进程负责采集麦克风 float32 PCM 和摄像头 JPEG 帧；MiniCPM 默认通过 `WS /voice/minicpm?mode=audio` 发送麦克风音频，摄像头 JPEG 和一段 WAV 通过 HTTP `/companion/respond` 发送给 AutoDL 的 face/audio 情绪模型。
+MiniCPM Realtime 推荐走本地 Agent：浏览器主应用优先调用本机 launcher 自动启动 Agent，launcher 不在线时才展示启动命令，不再调用 `getUserMedia`。本地 Python 进程负责采集麦克风 float32 PCM 和摄像头 JPEG 帧；MiniCPM 默认直连官方 `wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio`，摄像头 JPEG 和一段 WAV 通过 HTTP `/companion/respond` 发送给 AutoDL 的 face/audio 情绪模型。
 
 ```powershell
 conda run -n torch1 python -m pip install -r requirements-agent.txt

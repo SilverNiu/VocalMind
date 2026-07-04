@@ -129,6 +129,8 @@ def minicpm_voice_config() -> dict[str, object]:
         "local_agent": {
             "websocket_path": f"/voice/minicpm?mode={MINICPM_LOCAL_AGENT_MODE}",
             "mode": MINICPM_LOCAL_AGENT_MODE,
+            "minicpm_connection": "direct",
+            "minicpm_realtime_url": config.minicpm_realtime_url,
             "script": "scripts/local_minicpm_agent.py",
             "description": (
                 "Local Python agent captures camera and microphone instead of browser "
