@@ -548,7 +548,27 @@ conda run -n torch1 python scripts/demo_video_overlay.py --camera --camera-index
 conda run -n torch1 python scripts/demo_video_overlay.py --video path\to\video.mp4 --max-seconds 20 --audio-max-seconds 20
 ```
 
-如果后端已经部署到服务器，本机 demo 推荐只做采集和展示，情绪识别全部调用服务：
+如果后端已经部署到服务器，推荐使用本地 Agent 模式：摄像头和麦克风都由本机 Python 进程采集，浏览器前端不再负责读取媒体，也不需要浏览器 WebSocket。Agent 会按间隔把当前 JPEG 画面和一小段 WAV 音频通过 HTTP `/companion/respond` 发给后端：
+
+```powershell
+conda run -n torch1 python -m pip install -r requirements-agent.txt
+conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35.234.4:18080
+```
+
+如需指定摄像头或麦克风：
+
+```powershell
+conda run -n torch1 python scripts/local_media_agent.py --list-audio-devices
+conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35.234.4:18080 --camera-index 0 --mic-device 1
+```
+
+如需只采集画面、不采集麦克风：
+
+```powershell
+conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35.234.4:18080 --no-mic
+```
+
+底层服务调用 demo 仍可直接运行，适合调试单帧/分段请求：
 
 ```powershell
 conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --camera --camera-index 0 --no-output --skip-audio --max-seconds 0
