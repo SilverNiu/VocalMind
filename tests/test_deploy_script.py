@@ -102,6 +102,7 @@ def test_cloud_frontend_deploy_serves_static_frontend_and_proxies_api():
     assert "refusing to replace unsafe WEB_ROOT" in script
     assert "$SUDO cp -a \"$PROJECT_DIR/frontend/dist/.\" \"$WEB_ROOT/\"" in script
     assert "/www/server/panel/vhost/nginx/${SITE_NAME}.conf" in script
+    assert "/www/server/nginx/sbin/nginx" in script
     assert "$SUDO mkdir -p /etc/nginx/conf.d" in script
     assert "root ${WEB_ROOT};" in script
     assert "try_files \\$uri \\$uri/ /index.html;" in script
@@ -111,7 +112,10 @@ def test_cloud_frontend_deploy_serves_static_frontend_and_proxies_api():
     assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script
     assert "proxy_set_header Upgrade \\$http_upgrade;" in script
     assert 'proxy_set_header Connection "upgrade";' in script
-    assert "nginx -t" in script
+    assert "\"$nginx_bin\" -t" in script
+    assert "systemctl is-active --quiet nginx" in script
+    assert "\"$nginx_bin\" -s reload" in script
+    assert "$SUDO \"$nginx_bin\"" in script
     assert "demo_video_overlay.py" not in script
     assert "demo_service_overlay.py" not in script
     assert "sounddevice" not in script

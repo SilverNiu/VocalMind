@@ -43,7 +43,7 @@ ensure_repo() {
 }
 
 ensure_nginx() {
-  if command -v nginx >/dev/null 2>&1; then
+  if find_nginx >/dev/null 2>&1; then
     return
   fi
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -52,6 +52,18 @@ ensure_nginx() {
   fi
   $SUDO apt-get update
   $SUDO apt-get install -y nginx
+}
+
+find_nginx() {
+  if command -v nginx >/dev/null 2>&1; then
+    command -v nginx
+    return 0
+  fi
+  if [[ -x /www/server/nginx/sbin/nginx ]]; then
+    echo /www/server/nginx/sbin/nginx
+    return 0
+  fi
+  return 1
 }
 
 ensure_node() {
@@ -230,12 +242,20 @@ EOF
 }
 
 reload_nginx() {
-  $SUDO nginx -t
-  if command -v systemctl >/dev/null 2>&1; then
+  local nginx_bin
+  nginx_bin="$(find_nginx)"
+  $SUDO "$nginx_bin" -t
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
     $SUDO systemctl reload nginx
-  else
-    $SUDO nginx -s reload
+    return
   fi
+
+  if $SUDO "$nginx_bin" -s reload >/dev/null 2>&1; then
+    return
+  fi
+
+  $SUDO "$nginx_bin"
 }
 
 ensure_repo
