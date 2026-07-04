@@ -44,8 +44,13 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
 
     assert "https://github.com/SilverNiu/VocalMind.git" in script
     assert "FRONTEND_DIR=\"${FRONTEND_DIR:-${PROJECT_DIR}/frontend}\"" in script
-    assert "VITE_API_BASE=\"$FRONTEND_API_BASE\" npm run build" in script
-    assert "npm ci" in script
+    assert "INSTALL_NODEJS=\"${INSTALL_NODEJS:-1}\"" in script
+    assert "CONDA_NODE_ENV=\"${CONDA_NODE_ENV:-vocalmind-node}\"" in script
+    assert "ensure_node" in script
+    assert "conda-forge nodejs" in script
+    assert "apt-get install -y nodejs npm" in script
+    assert "\"${NPM_CMD[@]}\" ci" in script
+    assert "VITE_API_BASE=\"$FRONTEND_API_BASE\" \"${NPM_CMD[@]}\" run build" in script
     assert "dist/index.html" in script
     assert "deploy_autodl_backend.sh" in script
     assert "demo_video_overlay.py" not in script

@@ -270,7 +270,7 @@ cd VocalMind
 bash scripts/deploy_full_stack.sh
 ```
 
-`deploy_full_stack.sh` 会拉取 `SilverNiu/VocalMind`，执行 `frontend` 的 `npm ci` 和 `npm run build`，再启动 FastAPI。构建后的 `frontend/dist` 由后端同一个服务托管；如需覆盖前端请求地址，可设置 `FRONTEND_API_BASE`：
+`deploy_full_stack.sh` 会拉取 `SilverNiu/VocalMind`，自动检查并准备 Node.js/npm，执行 `frontend` 的 `npm ci` 和 `npm run build`，再启动 FastAPI。构建后的 `frontend/dist` 由后端同一个服务托管；如需覆盖前端请求地址，可设置 `FRONTEND_API_BASE`：
 
 ```bash
 cd /root/autodl-tmp/VocalMind
