@@ -329,6 +329,27 @@ bash scripts/deploy_autodl_backend.sh
 DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_autodl_backend.sh
 ```
 
+部署脚本默认会在 `vocalmind` 环境里安装语音链路需要的 `torch torchaudio`。如果日志出现 `PyTorch was not found`，说明当前运行中的服务还是旧环境或旧脚本，先停止 FastAPI 后重新拉代码并启动：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+git pull origin main
+CORS_ALLOW_ORIGINS="*" PORT=8000 DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_autodl_backend.sh
+```
+
+可单独检查 PyTorch：
+
+```bash
+conda run -n vocalmind python -c "import torch; print(torch.__version__)"
+```
+
+如果 AutoDL 需要指定 PyTorch CUDA wheel 源，可覆盖：
+
+```bash
+TORCH_PIP_EXTRA_ARGS="--index-url https://download.pytorch.org/whl/cu121" \
+  bash scripts/deploy_autodl_backend.sh
+```
+
 脚本会写入 `/root/autodl-tmp/VocalMind/.env.autodl`，并把模型路径固定到：
 
 ```text

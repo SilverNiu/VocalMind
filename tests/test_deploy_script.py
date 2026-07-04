@@ -11,6 +11,10 @@ def test_autodl_deploy_script_contains_required_backend_steps():
     assert "requirements-api.txt" in script
     assert "requirements-face.txt" in script
     assert "requirements-audio.txt" in script
+    assert "INSTALL_TORCH=\"${INSTALL_TORCH:-1}\"" in script
+    assert "TORCH_PACKAGES=\"${TORCH_PACKAGES:-torch torchaudio}\"" in script
+    assert "import torch" in script
+    assert "PyTorch is missing; installing" in script
     assert "uvicorn vocalmind.api.app:app" in script
     assert "CORS_ALLOW_ORIGINS" in script
     assert "PYTHON_VERSION=\"${PYTHON_VERSION:-3.11}\"" in script

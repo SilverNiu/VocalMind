@@ -16,6 +16,9 @@ CREATE_CONDA_ENV="${CREATE_CONDA_ENV:-1}"
 INSTALL_API="${INSTALL_API:-1}"
 INSTALL_FACE="${INSTALL_FACE:-1}"
 INSTALL_AUDIO="${INSTALL_AUDIO:-1}"
+INSTALL_TORCH="${INSTALL_TORCH:-1}"
+TORCH_PACKAGES="${TORCH_PACKAGES:-torch torchaudio}"
+TORCH_PIP_EXTRA_ARGS="${TORCH_PIP_EXTRA_ARGS:-}"
 DOWNLOAD_AUDIO_MODEL="${DOWNLOAD_AUDIO_MODEL:-0}"
 RUN_TESTS="${RUN_TESTS:-0}"
 
@@ -100,6 +103,11 @@ if [[ "$INSTALL_FACE" == "1" ]]; then
 fi
 if [[ "$INSTALL_AUDIO" == "1" ]]; then
   "$PYTHON_BIN" -m pip install --no-cache-dir -r requirements-audio.txt
+  if [[ "$INSTALL_TORCH" == "1" ]] && ! "$PYTHON_BIN" -c "import torch" >/dev/null 2>&1; then
+    echo "PyTorch is missing; installing ${TORCH_PACKAGES}."
+    # shellcheck disable=SC2086
+    "$PYTHON_BIN" -m pip install --no-cache-dir $TORCH_PACKAGES $TORCH_PIP_EXTRA_ARGS
+  fi
 fi
 
 mkdir -p "$LOCAL_MODELS_DIR" "$MODELSCOPE_CACHE" "$FACE_MODEL_DIR/onnx"
