@@ -108,6 +108,9 @@ def test_minicpm_voice_config_exposes_frontend_contract_without_key():
     assert body["websocket_path"] == "/voice/minicpm"
     assert body["local_agent"]["websocket_path"] == "/voice/minicpm?mode=video"
     assert body["local_agent"]["mode"] == "video"
+    assert body["local_agent"]["emotion_sampling"]["enabled"] is True
+    assert body["local_agent"]["emotion_sampling"]["endpoint"] == "/companion/respond"
+    assert body["local_agent"]["emotion_sampling"]["inference"] == "server"
     assert body["input_audio"]["sample_rate"] == 16000
     assert body["input_audio"]["encoding"] == "float32_pcm_base64"
     assert body["input_video"]["encoding"] == "jpeg_base64"
@@ -323,6 +326,29 @@ def test_companion_respond_returns_frontend_request_headers(monkeypatch):
         "client_platform": "web",
         "request_id": "request-123",
     }
+
+
+def test_companion_respond_can_skip_reply_for_agent_sampling(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app_module.clear_model_cache()
+    client = TestClient(app)
+
+    response = client.post(
+        "/companion/respond",
+        data={
+            "user_text": "Sample local media for emotion only.",
+            "audio_label": "calm",
+            "audio_confidence": "0.8",
+            "request_reply": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["audio_emotion"]["label"] == "calm"
+    assert body["reply"] is None
+    assert body["llm"]["mode"] == "skipped"
 
 
 def test_companion_websocket_returns_emotion_without_llm_by_default(monkeypatch):
