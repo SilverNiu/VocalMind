@@ -32,7 +32,7 @@ from scripts.local_minicpm_agent import (
 )
 
 
-def test_local_minicpm_agent_defaults_to_audio_mode_with_camera_emotion_sampling():
+def test_local_minicpm_agent_defaults_to_audio_mode_without_small_model_sampling():
     args = build_parser().parse_args([])
 
     kwargs = build_run_kwargs(args)
@@ -44,7 +44,7 @@ def test_local_minicpm_agent_defaults_to_audio_mode_with_camera_emotion_sampling
     assert kwargs["use_camera"] is True
     assert kwargs["mic_sample_rate"] == 16000
     assert kwargs["max_seconds"] is None
-    assert kwargs["emotion_sampling"] is True
+    assert kwargs["emotion_sampling"] is False
     assert kwargs["emotion_every_seconds"] == 3.0
     assert kwargs["emotion_audio_segment_seconds"] == 3.0
     assert kwargs["minicpm_realtime_url"] == "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
@@ -84,6 +84,14 @@ def test_local_minicpm_agent_can_disable_server_emotion_sampling():
     kwargs = build_run_kwargs(args)
 
     assert kwargs["emotion_sampling"] is False
+
+
+def test_local_minicpm_agent_can_enable_server_emotion_sampling():
+    args = build_parser().parse_args(["--emotion-sampling"])
+
+    kwargs = build_run_kwargs(args)
+
+    assert kwargs["emotion_sampling"] is True
 
 
 def test_local_minicpm_agent_accepts_status_file_path(tmp_path):

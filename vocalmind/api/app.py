@@ -137,10 +137,10 @@ def minicpm_voice_config() -> dict[str, object]:
                 "media APIs, and uploads sampled media to server-side emotion models."
             ),
             "emotion_sampling": {
-                "enabled": True,
+                "enabled": False,
                 "endpoint": "/companion/respond",
                 "inference": "server",
-                "disable_flag": "--no-emotion-sampling",
+                "enable_flag": "--emotion-sampling",
                 "recommended_interval_seconds": 3.0,
                 "audio_segment_seconds": 3.0,
             },

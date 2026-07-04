@@ -1,6 +1,6 @@
+import { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
-  Activity,
   Camera,
   Headphones,
   MessageCircle,
@@ -8,7 +8,7 @@ import {
   PhoneOff,
   Radio,
   Terminal,
-  UserRound,
+  Video,
   Volume2,
 } from 'lucide-react';
 import { GlassCard } from '../components/GlassCard';
@@ -17,7 +17,6 @@ import {
   MiniCpmStatus,
   useMiniCpmVoice,
 } from '../hooks/useMiniCpmVoice';
-import { MiniCpmEmotionPrediction } from '../lib/minicpmClient';
 
 interface MiniCpmVoiceViewProps {
   mode: MiniCpmSessionMode;
@@ -36,75 +35,37 @@ const statusText: Record<MiniCpmStatus, string> = {
 const modeMeta = {
   audio: {
     title: '语音对话',
-    subtitle: 'MiniCPM 实时语音',
+    subtitle: 'MiniCPM realtime demo',
     startLabel: '开始语音',
-    portraitLabel: '语音会话',
-    sampleLabel: '音频情绪模型',
+    frameLabel: '麦克风实时输入',
+    note: '小模型情绪识别已关闭，音频只进入 MiniCPM。',
     icon: Mic,
   },
   video: {
     title: '视频对话',
-    subtitle: 'MiniCPM 实时视频',
+    subtitle: 'MiniCPM realtime demo',
     startLabel: '开始视频',
-    portraitLabel: '人像采样',
-    sampleLabel: '音频 + 人脸情绪模型',
+    frameLabel: '摄像头实时输入',
+    note: '小模型情绪识别已关闭，视频帧只进入 MiniCPM。',
     icon: Camera,
   },
 } satisfies Record<MiniCpmSessionMode, {
   title: string;
   subtitle: string;
   startLabel: string;
-  portraitLabel: string;
-  sampleLabel: string;
+  frameLabel: string;
+  note: string;
   icon: typeof Mic;
 }>;
-
-function predictionText(prediction?: MiniCpmEmotionPrediction | null): string {
-  return prediction?.label?.trim() || '等待采样';
-}
-
-function confidenceText(prediction?: MiniCpmEmotionPrediction | null): string {
-  if (typeof prediction?.confidence !== 'number') return '--';
-  return `${Math.round(prediction.confidence * 100)}%`;
-}
-
-function EmotionPill({
-  title,
-  prediction,
-  icon: Icon,
-}: {
-  title: string;
-  prediction?: MiniCpmEmotionPrediction | null;
-  icon: typeof Activity;
-}) {
-  const hasValue = Boolean(prediction?.label);
-  return (
-    <div className="rounded-lg border border-white/80 bg-white/68 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-[13px] font-medium text-slate-500">
-          <Icon className="h-4 w-4 text-blue-500" />
-          {title}
-        </div>
-        <span className="text-[12px] tabular-nums text-slate-400">
-          {confidenceText(prediction)}
-        </span>
-      </div>
-      <div className={hasValue ? 'text-[20px] font-semibold text-[#1a2b4c]' : 'text-[17px] font-medium text-slate-400'}>
-        {predictionText(prediction)}
-      </div>
-    </div>
-  );
-}
 
 export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
   const meta = modeMeta[mode];
   const ModeIcon = meta.icon;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const {
-    agentCommand,
-    agentStatus,
+    attachVideoElement,
     config,
     debugEntries,
-    emotionStatus,
     inputLevel,
     isActive,
     lines,
@@ -113,8 +74,12 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
     stop,
   } = useMiniCpmVoice(mode);
 
+  useEffect(() => {
+    attachVideoElement(videoRef.current);
+  }, [attachVideoElement]);
+
   const handleEnd = async () => {
-    await stop(true);
+    await stop();
     onEnd();
   };
 
@@ -137,66 +102,65 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
             </div>
 
             <div className="relative mb-5 overflow-hidden rounded-lg border border-white/80 bg-slate-950/90 aspect-[4/3]">
-              <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-[12px] text-white/80 backdrop-blur">
+              <div className="absolute left-4 top-4 z-20 flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-[12px] text-white/80 backdrop-blur">
                 <ModeIcon className="h-4 w-4" />
-                {meta.portraitLabel}
+                {meta.frameLabel}
               </div>
-              <div className="absolute right-4 top-4 z-10 rounded-full bg-emerald-400/18 px-3 py-1.5 text-[12px] text-emerald-100">
-                {meta.sampleLabel}
+              <div className="absolute right-4 top-4 z-20 rounded-full bg-emerald-400/18 px-3 py-1.5 text-[12px] text-emerald-100">
+                MiniCPM only
               </div>
-              <div className="flex h-full items-center justify-center">
-                <motion.div
-                  animate={{
-                    scale: isActive ? [1, inputLevel, 1] : 1,
-                    opacity: status === 'error' ? 0.45 : 1,
-                  }}
-                  transition={{ duration: 0.9, repeat: isActive ? Infinity : 0 }}
-                  className="flex h-36 w-36 items-center justify-center rounded-full bg-gradient-to-tr from-blue-500 to-cyan-400 text-white shadow-[0_18px_55px_rgba(37,99,235,0.34)]"
-                >
-                  {status === 'speaking' ? (
-                    <Volume2 className="h-16 w-16" />
-                  ) : mode === 'video' ? (
-                    <UserRound className="h-16 w-16" />
-                  ) : (
-                    <Headphones className="h-16 w-16" />
-                  )}
-                </motion.div>
-              </div>
-              <div className="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2 text-[12px] text-white/78">
-                <div className="rounded-md bg-white/10 px-3 py-2 backdrop-blur">
-                  音频块 {agentStatus?.audio_chunks_sent || 0}
+
+              {mode === 'video' ? (
+                <video
+                  ref={videoRef}
+                  className="h-full w-full object-cover"
+                  muted
+                  playsInline
+                  autoPlay
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <motion.div
+                    animate={{
+                      scale: isActive ? [1, inputLevel, 1] : 1,
+                      opacity: status === 'error' ? 0.45 : 1,
+                    }}
+                    transition={{ duration: 0.9, repeat: isActive ? Infinity : 0 }}
+                    className="flex h-36 w-36 items-center justify-center rounded-full bg-gradient-to-tr from-blue-500 to-cyan-400 text-white shadow-[0_18px_55px_rgba(37,99,235,0.34)]"
+                  >
+                    {status === 'speaking' ? (
+                      <Volume2 className="h-16 w-16" />
+                    ) : (
+                      <Headphones className="h-16 w-16" />
+                    )}
+                  </motion.div>
                 </div>
-                <div className="rounded-md bg-white/10 px-3 py-2 backdrop-blur">
-                  视频帧 {agentStatus?.video_frames_sent || 0}
-                </div>
-                <div className="rounded-md bg-white/10 px-3 py-2 backdrop-blur">
-                  情绪采样 {agentStatus?.emotion_requests_sent || 0}
-                </div>
+              )}
+
+              <div className="absolute bottom-4 left-4 right-4 z-20 rounded-md bg-white/10 px-3 py-2 text-[12px] leading-relaxed text-white/78 backdrop-blur">
+                {meta.note}
               </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <EmotionPill
-                title="音频情绪"
-                prediction={emotionStatus?.audio_emotion}
-                icon={Headphones}
-              />
-              {mode === 'video' && (
-                <EmotionPill
-                  title="人脸情绪"
-                  prediction={emotionStatus?.face_emotion}
-                  icon={Camera}
-                />
-              )}
-              {mode === 'video' && (
-                <div className="md:col-span-2">
-                  <EmotionPill
-                    title="融合判定"
-                    prediction={emotionStatus?.fusion_emotion}
-                    icon={Activity}
-                  />
+              <div className="rounded-lg border border-white/80 bg-white/68 px-4 py-3">
+                <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-slate-500">
+                  <Mic className="h-4 w-4 text-blue-500" />
+                  输入格式
                 </div>
-              )}
+                <div className="text-[17px] font-semibold text-[#1a2b4c]">
+                  {config?.input_audio.sample_rate || 16000}Hz float32 PCM
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/80 bg-white/68 px-4 py-3">
+                <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-slate-500">
+                  <Volume2 className="h-4 w-4 text-blue-500" />
+                  输出格式
+                </div>
+                <div className="text-[17px] font-semibold text-[#1a2b4c]">
+                  {config?.output_audio.sample_rate || 24000}Hz PCM 播放
+                </div>
+              </div>
             </div>
           </div>
 
@@ -228,26 +192,15 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
               <div>
                 <h2 className="text-[18px] font-semibold text-slate-800">CPM 聊天窗口</h2>
                 <p className="text-[12px] text-slate-400">
-                  {config?.local_agent?.minicpm_connection === 'server_proxy' ? 'server proxy' : 'direct realtime'}
+                  /voice/minicpm WebSocket proxy
                 </p>
               </div>
             </div>
-            <span className="rounded-full bg-slate-50 px-3 py-1.5 text-[12px] text-slate-500">
+            <span className="flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1.5 text-[12px] text-slate-500">
+              <Video className="h-3.5 w-3.5" />
               mode={mode}
             </span>
           </div>
-
-          {agentCommand && (
-            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-blue-600">
-                <Terminal className="h-4 w-4" />
-                本地启动命令
-              </div>
-              <code className="block whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-700">
-                {agentCommand}
-              </code>
-            </div>
-          )}
 
           <div className="flex-1 space-y-3 overflow-y-auto pr-1">
             {lines.map(line => (
@@ -268,13 +221,13 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
 
           <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-950/90 px-4 py-3 shadow-inner">
             <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="text-[13px] font-medium text-slate-100">启动返回值调试</span>
+              <span className="text-[13px] font-medium text-slate-100">MiniCPM demo 调试</span>
               <span className="text-[11px] text-slate-400">{debugEntries.length} 条</span>
             </div>
             <div className="max-h-[150px] space-y-3 overflow-y-auto pr-1">
               {debugEntries.length === 0 ? (
                 <p className="text-[12px] leading-relaxed text-slate-400">
-                  点击开始后，配置接口和本地 launcher 的原始返回值会显示在这里。
+                  点击开始后，配置、WebSocket 和 MiniCPM realtime 事件会显示在这里。
                 </p>
               ) : (
                 debugEntries.map(entry => (

@@ -43,6 +43,7 @@ DEFAULT_MINICPM_MODE = "audio"
 DEFAULT_AUDIO_CHUNK_SECONDS = 0.24
 DEFAULT_VIDEO_FPS = 1.0
 DEFAULT_OUTPUT_SAMPLE_RATE = 24000
+DEFAULT_EMOTION_SAMPLING = False
 DEFAULT_EMOTION_EVERY_SECONDS = DEFAULT_INFER_EVERY_SECONDS
 DEFAULT_EMOTION_AUDIO_SEGMENT_SECONDS = DEFAULT_AUDIO_SEGMENT_SECONDS
 
@@ -92,11 +93,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-sample-rate", type=int, default=DEFAULT_OUTPUT_SAMPLE_RATE)
     parser.add_argument("--no-playback", action="store_true", help="Do not play MiniCPM audio.")
     parser.add_argument("--force-listen", action="store_true")
-    parser.add_argument(
-        "--no-emotion-sampling",
+    emotion_group = parser.add_mutually_exclusive_group()
+    emotion_group.add_argument(
+        "--emotion-sampling",
+        dest="emotion_sampling",
         action="store_true",
+        help="Enable local media uploads to AutoDL face/audio emotion models.",
+    )
+    emotion_group.add_argument(
+        "--no-emotion-sampling",
+        dest="emotion_sampling",
+        action="store_false",
         help="Disable local media uploads to AutoDL face/audio emotion models.",
     )
+    parser.set_defaults(emotion_sampling=DEFAULT_EMOTION_SAMPLING)
     parser.add_argument("--emotion-user-text", default=DEFAULT_USER_TEXT)
     parser.add_argument(
         "--emotion-every-seconds",
@@ -151,7 +161,7 @@ def build_run_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "output_sample_rate": args.output_sample_rate,
         "playback": not args.no_playback,
         "force_listen": args.force_listen,
-        "emotion_sampling": not args.no_emotion_sampling,
+        "emotion_sampling": args.emotion_sampling,
         "emotion_user_text": args.emotion_user_text,
         "emotion_every_seconds": args.emotion_every_seconds,
         "emotion_audio_segment_seconds": args.emotion_audio_segment_seconds,
@@ -671,7 +681,11 @@ async def run_local_minicpm_agent(
         "text_events_received": 0,
         "audio_events_received": 0,
         "emotion_sampling": emotion_sampling,
-        "emotion_modalities": ["audio", "face"] if mode == "video" else ["audio"],
+        "emotion_modalities": (
+            ["audio", "face"] if emotion_sampling and mode == "video"
+            else ["audio"] if emotion_sampling
+            else []
+        ),
         "emotion_frames_captured": 0,
         "emotion_requests_sent": 0,
         "emotion_errors": [],

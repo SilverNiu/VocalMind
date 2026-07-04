@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBackendConfig } from '../lib/backendClient';
 import {
+  buildMiniCpmWebSocketUrl,
   fetchMiniCpmConfig,
-  fetchMiniCpmLocalAgentStatus,
   MiniCpmConfig,
-  MiniCpmEmotionStatus,
-  MiniCpmLocalAgentStatus,
-  shutdownMiniCpmLocalLauncher,
-  startMiniCpmLocalAgent,
 } from '../lib/minicpmClient';
+import {
+  MiniCpmRealtimeSession,
+  MiniCpmRealtimeStatus,
+} from '../lib/minicpmRealtime';
 
 export type MiniCpmSessionMode = 'audio' | 'video';
 
@@ -39,45 +39,15 @@ function initialLines(mode: MiniCpmSessionMode): MiniCpmTranscriptLine[] {
       role: 'system',
       text:
         mode === 'video'
-          ? '视频会话待机：MiniCPM 对话，音频与人脸情绪采样。'
-          : '语音会话待机：MiniCPM 对话，仅音频情绪采样。',
+          ? '视频会话待机：MiniCPM 对话，摄像头画面只发送给 MiniCPM，不启用小模型。'
+          : '语音会话待机：MiniCPM 对话，不启用小模型情绪识别。',
     },
   ];
 }
 
-function linesFromAgentStatus(
-  agentStatus: MiniCpmLocalAgentStatus | null | undefined,
-  mode: MiniCpmSessionMode
-): MiniCpmTranscriptLine[] {
-  if (agentStatus?.errors?.length) {
-    return [
-      {
-        id: 'agent-error',
-        role: 'error',
-        text: agentStatus.errors[agentStatus.errors.length - 1],
-      },
-    ];
-  }
-
-  const cpmMessages = agentStatus?.cpm_messages?.filter(message => message.text.trim());
-  if (cpmMessages?.length) {
-    return cpmMessages.map(message => ({
-      id: message.id,
-      role: message.role,
-      text: message.text,
-    }));
-  }
-
-  return [
-    {
-      id: 'listening',
-      role: 'system',
-      text:
-        mode === 'video'
-          ? '本地 Agent 正在监听视频会话。'
-          : '本地 Agent 正在监听语音会话。',
-    },
-  ];
+function mapRealtimeStatus(status: MiniCpmRealtimeStatus): MiniCpmStatus {
+  if (status === 'closed') return 'idle';
+  return status;
 }
 
 export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
@@ -85,10 +55,9 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
   const [lines, setLines] = useState<MiniCpmTranscriptLine[]>(() => initialLines(sessionMode));
   const [inputLevel, setInputLevel] = useState(0.35);
   const [config, setConfig] = useState<MiniCpmConfig | null>(null);
-  const [agentCommand, setAgentCommand] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<MiniCpmLocalAgentStatus | null>(null);
-  const [emotionStatus, setEmotionStatus] = useState<MiniCpmEmotionStatus | null>(null);
   const [debugEntries, setDebugEntries] = useState<MiniCpmDebugEntry[]>([]);
+  const sessionRef = useRef<MiniCpmRealtimeSession | null>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
 
   const appendDebugEntry = useCallback((label: string, payload: unknown) => {
     setDebugEntries(prev => [
@@ -104,216 +73,118 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
   useEffect(() => {
     if (status === 'idle') {
       setLines(initialLines(sessionMode));
-      setAgentStatus(null);
-      setEmotionStatus(null);
+      setInputLevel(0.35);
     }
   }, [sessionMode, status]);
 
-  const stop = useCallback(async (closeLauncher = true) => {
-    const launcher = config?.local_agent?.launcher;
-    if (closeLauncher && launcher) {
-      try {
-        await shutdownMiniCpmLocalLauncher(launcher);
-      } catch {
-        // The launcher may already be closed; ending the view should still reset local UI state.
+  const attachVideoElement = useCallback((element: HTMLVideoElement | null) => {
+    videoElementRef.current = element;
+  }, []);
+
+  const appendAssistantText = useCallback((text: string) => {
+    setLines(prev => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'assistant') {
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            text: `${last.text}${text}`,
+          },
+        ];
       }
-    }
+      return [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          text,
+        },
+      ];
+    });
+  }, []);
+
+  const appendErrorLine = useCallback((text: string) => {
+    setLines(prev => [
+      ...prev,
+      {
+        id: `error-${Date.now()}`,
+        role: 'error',
+        text,
+      },
+    ]);
+  }, []);
+
+  const stop = useCallback(async () => {
+    sessionRef.current?.stop(true);
+    sessionRef.current = null;
     setStatus('idle');
     setInputLevel(0.35);
-    setAgentStatus(null);
-    setEmotionStatus(null);
-  }, [config]);
+  }, []);
 
   const start = useCallback(async () => {
-    await stop(false);
+    await stop();
     setStatus('connecting');
-    setAgentCommand(null);
     setDebugEntries([]);
     setLines([
       {
         id: 'loading',
         role: 'system',
-        text: '正在连接本地 MiniCPM Agent。',
+        text: '正在连接 MiniCPM realtime demo 通道。',
       },
     ]);
 
     try {
       const { apiBase } = getBackendConfig();
       const nextConfig = await fetchMiniCpmConfig(apiBase);
-      appendDebugEntry('GET /voice/minicpm/config', nextConfig);
-      const localAgent = nextConfig.local_agent;
-      const script = localAgent?.script || 'scripts/local_minicpm_agent.py';
-      const websocketPath = withMiniCpmMode(
-        localAgent?.websocket_path || nextConfig.websocket_path,
-        sessionMode,
-      );
-      const directRealtimeUrl = withMiniCpmMode(localAgent?.minicpm_realtime_url, sessionMode);
-      const command = directRealtimeUrl
-        ? `python ${script} --api-base ${apiBase} --mode ${sessionMode} --minicpm-realtime-url "${directRealtimeUrl}"`
-        : `python ${script} --api-base ${apiBase} --websocket-path "${websocketPath}" --mode ${sessionMode}`;
-      const launcher = localAgent?.launcher;
-      const launcherCommand = `python ${launcher?.script || 'scripts/local_agent_launcher.py'}`;
-
+      const wsUrl = buildMiniCpmWebSocketUrl(apiBase, nextConfig.websocket_path, sessionMode);
       setConfig(nextConfig);
-      if (launcher) {
-        try {
-          const launcherPayload = {
-            api_base: apiBase,
-            mode: sessionMode,
-            minicpm_realtime_url: directRealtimeUrl,
-          };
-          appendDebugEntry('POST local launcher /start payload', launcherPayload);
-          const launcherResult = await startMiniCpmLocalAgent(launcher, {
-            api_base: apiBase,
-            mode: sessionMode,
-            minicpm_realtime_url: directRealtimeUrl,
-          });
-          appendDebugEntry('POST local launcher /start response', launcherResult);
-          setAgentCommand(null);
-          setInputLevel(1);
-          setStatus('listening');
-          setLines([
-            {
-              id: 'ready',
-              role: 'system',
-              text: launcherResult.already_running
-                ? '本地 Agent 已在运行。'
-                : '本地 Agent 已启动。',
-            },
-          ]);
-          return;
-        } catch (launcherError) {
-          const launcherMessage = launcherError instanceof Error ? launcherError.message : String(launcherError);
-          appendDebugEntry('POST local launcher /start error', {
-            message: launcherMessage,
-          });
-          setAgentCommand(launcherCommand);
-          setStatus('error');
-          setLines([
-            {
-              id: 'launcher-missing',
-              role: 'error',
-              text: `本地 launcher 未响应。${launcherMessage}`,
-            },
-          ]);
-          return;
-        }
-      }
-      setAgentCommand(command);
-      appendDebugEntry('manual local agent command', {
-        command,
-      });
-      setInputLevel(1);
-      setStatus('listening');
-      setLines([
-        {
-          id: 'ready',
-          role: 'system',
-          text: '本地 Agent 命令已生成。',
+      appendDebugEntry('GET /voice/minicpm/config', nextConfig);
+      appendDebugEntry('MiniCPM websocket url', { wsUrl, mode: sessionMode });
+
+      const session = new MiniCpmRealtimeSession({
+        wsUrl,
+        mode: sessionMode,
+        videoElement: videoElementRef.current,
+        onStatus: (nextStatus, detail) => {
+          setStatus(mapRealtimeStatus(nextStatus));
+          if (detail) appendDebugEntry('MiniCPM status detail', { status: nextStatus, detail });
         },
-      ]);
+        onAssistantText: appendAssistantText,
+        onAssistantDone: () => {
+          appendDebugEntry('MiniCPM response done', { at: new Date().toISOString() });
+        },
+        onInputLevel: setInputLevel,
+        onDebug: appendDebugEntry,
+        onError: appendErrorLine,
+      });
+      sessionRef.current = session;
+      session.start();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      appendDebugEntry('MiniCPM start error', {
-        message,
-      });
       setStatus('error');
-      setLines([
-        {
-          id: 'error',
-          role: 'error',
-          text: `无法读取 MiniCPM 配置：${message}`,
-        },
-      ]);
+      appendDebugEntry('MiniCPM start error', { message });
+      appendErrorLine(`无法启动 MiniCPM：${message}`);
     }
-  }, [appendDebugEntry, sessionMode, stop]);
-
-  const isActive = status !== 'idle' && status !== 'error';
+  }, [appendAssistantText, appendDebugEntry, appendErrorLine, sessionMode, stop]);
 
   useEffect(() => {
-    const launcher = config?.local_agent?.launcher;
-    if (!isActive || !launcher) return;
-
-    let cancelled = false;
-    const pollStatus = async () => {
-      try {
-        const launcherStatus = await fetchMiniCpmLocalAgentStatus(launcher);
-        if (cancelled) return;
-
-        const nextAgentStatus = launcherStatus.status;
-        setAgentStatus(nextAgentStatus || null);
-        setEmotionStatus(nextAgentStatus?.last_emotion_response || null);
-        setLines(linesFromAgentStatus(nextAgentStatus, sessionMode));
-
-        if (nextAgentStatus?.errors?.length || nextAgentStatus?.ok === false) {
-          setStatus('error');
-        } else if (nextAgentStatus?.cpm_messages?.some(message => !message.complete)) {
-          setStatus('speaking');
-        } else if (launcherStatus.running || nextAgentStatus?.running) {
-          setStatus('listening');
-        } else {
-          setStatus('error');
-          setLines([
-            {
-              id: 'agent-stopped',
-              role: 'error',
-              text: '本地 Agent 已退出。',
-            },
-          ]);
-        }
-
-        setInputLevel(nextAgentStatus?.audio_chunks_sent ? 1.05 : 0.85);
-      } catch {
-        if (!cancelled) {
-          setStatus('error');
-          setLines([
-            {
-              id: 'status-error',
-              role: 'error',
-              text: '无法读取本地 Agent 状态。',
-            },
-          ]);
-        }
-      }
-    };
-
-    void pollStatus();
-    const interval = window.setInterval(() => void pollStatus(), 1000);
     return () => {
-      cancelled = true;
-      window.clearInterval(interval);
+      sessionRef.current?.stop(true);
+      sessionRef.current = null;
     };
-  }, [config, isActive, sessionMode]);
+  }, []);
 
   return {
-    agentCommand,
-    agentStatus,
+    attachVideoElement,
     config,
     debugEntries,
-    emotionStatus,
     inputLevel,
-    isActive,
+    isActive: status !== 'idle' && status !== 'error',
     lines,
     sessionMode,
     start,
     status,
     stop,
   };
-}
-
-function withMiniCpmMode(value: string | undefined, mode: MiniCpmSessionMode): string | undefined {
-  if (!value) return value;
-  try {
-    const url = new URL(value, window.location.origin);
-    url.searchParams.set('mode', mode);
-    if (value.startsWith('/')) {
-      return `${url.pathname}${url.search}`;
-    }
-    return url.toString();
-  } catch {
-    const [path, query = ''] = value.split('?');
-    const params = new URLSearchParams(query);
-    params.set('mode', mode);
-    return `${path}?${params.toString()}`;
-  }
 }
