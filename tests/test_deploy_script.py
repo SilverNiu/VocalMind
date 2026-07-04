@@ -81,7 +81,8 @@ def test_nginx_reverse_proxy_script_matches_current_public_route():
     assert "UPSTREAM_HOST=\"${UPSTREAM_HOST:-127.0.0.1}\"" in script
     assert "UPSTREAM_PORT=\"${UPSTREAM_PORT:-18000}\"" in script
     assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script
-    assert "location = /voice/minicpm" in script
+    assert "location = /voice/minicpm/config" in script
+    assert "location ^~ /voice/minicpm" in script
     assert "proxy_set_header Upgrade \\$http_upgrade;" in script
     assert 'proxy_set_header Connection "upgrade";' in script
     assert "PROXY_WS_TIMEOUT=\"${PROXY_WS_TIMEOUT:-3600s}\"" in script
@@ -106,7 +107,8 @@ def test_cloud_frontend_deploy_serves_static_frontend_and_proxies_api():
     assert "$SUDO mkdir -p /etc/nginx/conf.d" in script
     assert "root ${WEB_ROOT};" in script
     assert "try_files \\$uri \\$uri/ /index.html;" in script
-    assert "location = /voice/minicpm" in script
+    assert "location = /voice/minicpm/config" in script
+    assert "location ^~ /voice/minicpm" in script
     assert "location /ws/" in script
     assert "location ~ ^/(health|demo|voice|emotion|companion)(/|$)" in script
     assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script

@@ -182,7 +182,21 @@ server {
     index index.html;
     client_max_body_size ${CLIENT_MAX_BODY_SIZE};
 
-    location = /voice/minicpm {
+    location = /voice/minicpm/config {
+        proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_connect_timeout 30s;
+        proxy_read_timeout ${PROXY_TIMEOUT};
+        proxy_send_timeout ${PROXY_TIMEOUT};
+    }
+
+    location ^~ /voice/minicpm {
         proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
         proxy_http_version 1.1;
 
