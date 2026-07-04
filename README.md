@@ -343,11 +343,31 @@ CORS_ALLOW_ORIGINS="*" PORT=8000 DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_auto
 conda run -n vocalmind python -c "import torch; print(torch.__version__)"
 ```
 
+部署脚本默认会检查并安装 `ffmpeg`。如果日志出现 `Notice: ffmpeg is not installed`，拉取最新代码并重启脚本即可；也可以在 AutoDL 上单独检查：
+
+```bash
+ffmpeg -version
+```
+
 如果 AutoDL 需要指定 PyTorch CUDA wheel 源，可覆盖：
 
 ```bash
 TORCH_PIP_EXTRA_ARGS="--index-url https://download.pytorch.org/whl/cu121" \
   bash scripts/deploy_autodl_backend.sh
+```
+
+部署脚本也会检查 OpenCV 人脸检测器。如果日志出现 `module 'cv2' has no attribute 'CascadeClassifier'`，通常是服务器环境里装了错误或冲突的 OpenCV 包。拉取最新代码并重启脚本会自动重装 `opencv-python-headless`：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+git pull origin main
+CORS_ALLOW_ORIGINS="*" PORT=8000 DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_autodl_backend.sh
+```
+
+可单独检查 OpenCV：
+
+```bash
+conda run -n vocalmind python -c "import cv2; print(cv2.__version__, hasattr(cv2, 'CascadeClassifier'), cv2.data.haarcascades)"
 ```
 
 脚本会写入 `/root/autodl-tmp/VocalMind/.env.autodl`，并把模型路径固定到：

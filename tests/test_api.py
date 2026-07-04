@@ -164,6 +164,24 @@ def test_face_endpoint_returns_json_error_for_missing_model_dependency(monkeypat
     app_module.clear_model_cache()
 
 
+def test_face_endpoint_returns_json_error_when_detector_dependency_breaks(monkeypatch):
+    class BrokenFaceRecognizer:
+        def predict_array(self, image):
+            raise RuntimeError("OpenCV CascadeClassifier is unavailable")
+
+    monkeypatch.setattr(app_module, "get_face_recognizer", lambda: BrokenFaceRecognizer())
+    client = TestClient(app)
+
+    response = client.post(
+        "/emotion/face",
+        files={"file": ("blank.png", _blank_png_bytes(), "image/png")},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "model_unavailable"
+    assert "CascadeClassifier" in response.json()["error"]["message"]
+
+
 def test_companion_respond_uses_existing_emotion_and_local_fallback(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

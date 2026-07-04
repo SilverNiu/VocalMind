@@ -17,10 +17,12 @@ INSTALL_API="${INSTALL_API:-1}"
 INSTALL_FACE="${INSTALL_FACE:-1}"
 INSTALL_AUDIO="${INSTALL_AUDIO:-1}"
 INSTALL_TORCH="${INSTALL_TORCH:-1}"
+INSTALL_FFMPEG="${INSTALL_FFMPEG:-1}"
 TORCH_PACKAGES="${TORCH_PACKAGES:-torch torchaudio}"
 TORCH_PIP_EXTRA_ARGS="${TORCH_PIP_EXTRA_ARGS:-}"
 DOWNLOAD_AUDIO_MODEL="${DOWNLOAD_AUDIO_MODEL:-0}"
 RUN_TESTS="${RUN_TESTS:-0}"
+OPENCV_PACKAGE="${OPENCV_PACKAGE:-opencv-python-headless>=4.8.0}"
 
 CORS_ALLOW_ORIGINS="${CORS_ALLOW_ORIGINS:-*}"
 LOCAL_MODELS_DIR="${LOCAL_MODELS_DIR:-${PROJECT_DIR}/local_models}"
@@ -42,6 +44,31 @@ find_conda() {
   done
 
   return 1
+}
+
+ensure_ffmpeg() {
+  if [[ "$INSTALL_FFMPEG" != "1" ]]; then
+    return
+  fi
+  if command -v ffmpeg >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "ffmpeg is missing; installing ffmpeg."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y ffmpeg
+    return
+  fi
+
+  local conda_bin
+  conda_bin="$(find_conda || true)"
+  if [[ -n "$conda_bin" ]]; then
+    "$conda_bin" install -y -n "$CONDA_ENV_NAME" -c conda-forge ffmpeg
+    return
+  fi
+
+  echo "WARN: ffmpeg is unavailable and could not be installed automatically." >&2
 }
 
 ensure_python_env() {
@@ -78,6 +105,29 @@ ensure_python_env() {
   "$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel
 }
 
+ensure_opencv_face_detector() {
+  if "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import cv2
+assert hasattr(cv2, "CascadeClassifier")
+assert getattr(cv2, "data", None) is not None
+assert cv2.data.haarcascades
+PY
+  then
+    return
+  fi
+
+  echo "OpenCV CascadeClassifier is unavailable; reinstalling ${OPENCV_PACKAGE}."
+  "$PYTHON_BIN" -m pip uninstall -y cv2 opencv-python opencv-python-headless || true
+  "$PYTHON_BIN" -m pip install --no-cache-dir "$OPENCV_PACKAGE"
+  "$PYTHON_BIN" - <<'PY'
+import cv2
+assert hasattr(cv2, "CascadeClassifier"), "OpenCV CascadeClassifier is unavailable"
+assert getattr(cv2, "data", None) is not None, "OpenCV data module is unavailable"
+assert cv2.data.haarcascades, "OpenCV haarcascades path is unavailable"
+print("opencv face detector ok")
+PY
+}
+
 mkdir -p "$WORKDIR"
 
 if [[ -d "$PROJECT_DIR/.git" ]]; then
@@ -93,6 +143,7 @@ fi
 
 cd "$PROJECT_DIR"
 ensure_python_env
+ensure_ffmpeg
 echo "Using Python: $("$PYTHON_BIN" --version) at $PYTHON_BIN"
 
 if [[ "$INSTALL_API" == "1" ]]; then
@@ -100,6 +151,7 @@ if [[ "$INSTALL_API" == "1" ]]; then
 fi
 if [[ "$INSTALL_FACE" == "1" ]]; then
   "$PYTHON_BIN" -m pip install --no-cache-dir -r requirements-face.txt
+  ensure_opencv_face_detector
 fi
 if [[ "$INSTALL_AUDIO" == "1" ]]; then
   "$PYTHON_BIN" -m pip install --no-cache-dir -r requirements-audio.txt

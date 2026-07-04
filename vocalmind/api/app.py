@@ -172,7 +172,10 @@ async def _predict_face_upload(file: UploadFile) -> EmotionPrediction:
     try:
         image = load_rgb_image(tmp_path)
         recognizer = get_face_recognizer()
-        return recognizer.predict_array(image)
+        try:
+            return recognizer.predict_array(image)
+        except RuntimeError as exc:
+            raise ModelUnavailableError(str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 

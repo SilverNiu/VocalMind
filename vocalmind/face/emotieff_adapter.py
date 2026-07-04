@@ -105,6 +105,12 @@ def detect_faces(image: np.ndarray) -> list[FaceBox]:
     if image.ndim != 3 or image.shape[2] != 3:
         raise ImageInputError("Expected an RGB image array.", code="image_invalid")
 
+    if not hasattr(cv2, "CascadeClassifier"):
+        raise RuntimeError(
+            "OpenCV CascadeClassifier is unavailable. Reinstall opencv-python-headless "
+            "or opencv-python in the active environment."
+        )
+
     cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
     classifier = cv2.CascadeClassifier(str(cascade_path))
     if classifier.empty():
