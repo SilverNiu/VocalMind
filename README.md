@@ -356,7 +356,7 @@ TORCH_PIP_EXTRA_ARGS="--index-url https://download.pytorch.org/whl/cu121" \
   bash scripts/deploy_autodl_backend.sh
 ```
 
-部署脚本也会检查 OpenCV 人脸检测器。如果日志出现 `module 'cv2' has no attribute 'CascadeClassifier'`，通常是服务器环境里装了错误或冲突的 OpenCV 包。拉取最新代码并重启脚本会自动重装 `opencv-python-headless`：
+部署脚本也会检查 OpenCV 人脸检测器。如果日志出现 `module 'cv2' has no attribute 'CascadeClassifier'`，或者检查结果类似 `5.0.0 False .../cv2/data/`，通常是服务器环境里装了错误或冲突的 `cv2`/OpenCV 包。拉取最新代码并重启脚本会清理冲突包，再安装 `opencv-python-headless>=4.8.0,<5`：
 
 ```bash
 cd /root/autodl-tmp/VocalMind
@@ -367,6 +367,14 @@ CORS_ALLOW_ORIGINS="*" PORT=8000 DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_auto
 可单独检查 OpenCV：
 
 ```bash
+conda run -n vocalmind python -c "import cv2; print(cv2.__version__, hasattr(cv2, 'CascadeClassifier'), cv2.data.haarcascades)"
+```
+
+如果脚本还没更新到最新版本，可先手动清理一次：
+
+```bash
+conda run -n vocalmind python -m pip uninstall -y cv2 opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
+conda run -n vocalmind python -m pip install --no-cache-dir "opencv-python-headless>=4.8.0,<5"
 conda run -n vocalmind python -c "import cv2; print(cv2.__version__, hasattr(cv2, 'CascadeClassifier'), cv2.data.haarcascades)"
 ```
 

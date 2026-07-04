@@ -22,7 +22,7 @@ TORCH_PACKAGES="${TORCH_PACKAGES:-torch torchaudio}"
 TORCH_PIP_EXTRA_ARGS="${TORCH_PIP_EXTRA_ARGS:-}"
 DOWNLOAD_AUDIO_MODEL="${DOWNLOAD_AUDIO_MODEL:-0}"
 RUN_TESTS="${RUN_TESTS:-0}"
-OPENCV_PACKAGE="${OPENCV_PACKAGE:-opencv-python-headless>=4.8.0}"
+OPENCV_PACKAGE="${OPENCV_PACKAGE:-opencv-python-headless>=4.8.0,<5}"
 
 CORS_ALLOW_ORIGINS="${CORS_ALLOW_ORIGINS:-*}"
 LOCAL_MODELS_DIR="${LOCAL_MODELS_DIR:-${PROJECT_DIR}/local_models}"
@@ -71,6 +71,53 @@ ensure_ffmpeg() {
   echo "WARN: ffmpeg is unavailable and could not be installed automatically." >&2
 }
 
+list_opencv_distributions() {
+  "$PYTHON_BIN" - <<'PY'
+from importlib import metadata
+
+targets = {
+    "cv2",
+    "opencv-python",
+    "opencv-python-headless",
+    "opencv-contrib-python",
+    "opencv-contrib-python-headless",
+}
+found = set()
+for dist in metadata.distributions():
+    name = dist.metadata.get("Name", "")
+    normalized = name.lower().replace("_", "-")
+    top_level = dist.read_text("top_level.txt") or ""
+    top_modules = {line.strip() for line in top_level.splitlines() if line.strip()}
+    if normalized in targets or "cv2" in top_modules:
+        found.add(name)
+
+print(" ".join(sorted(found)))
+PY
+}
+
+remove_residual_cv2_package() {
+  "$PYTHON_BIN" - <<'PY'
+import importlib.util
+import pathlib
+import shutil
+
+spec = importlib.util.find_spec("cv2")
+if spec is None:
+    raise SystemExit(0)
+
+paths = set()
+if spec.submodule_search_locations:
+    paths.update(pathlib.Path(path).resolve() for path in spec.submodule_search_locations)
+elif spec.origin:
+    paths.add(pathlib.Path(spec.origin).resolve().parent)
+
+for path in paths:
+    if path.name == "cv2" and "site-packages" in path.parts and path.exists():
+        shutil.rmtree(path)
+        print(f"removed residual {path}")
+PY
+}
+
 ensure_python_env() {
   if [[ -n "$PYTHON_BIN_OVERRIDE" ]]; then
     PYTHON_BIN="$PYTHON_BIN_OVERRIDE"
@@ -108,6 +155,7 @@ ensure_python_env() {
 ensure_opencv_face_detector() {
   if "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
 import cv2
+assert int(cv2.__version__.split(".", 1)[0]) < 5
 assert hasattr(cv2, "CascadeClassifier")
 assert getattr(cv2, "data", None) is not None
 assert cv2.data.haarcascades
@@ -117,14 +165,21 @@ PY
   fi
 
   echo "OpenCV CascadeClassifier is unavailable; reinstalling ${OPENCV_PACKAGE}."
-  "$PYTHON_BIN" -m pip uninstall -y cv2 opencv-python opencv-python-headless || true
+  opencv_distributions="$(list_opencv_distributions | tr -d '\r')"
+  if [[ -n "$opencv_distributions" ]]; then
+    echo "Removing OpenCV/cv2 packages: ${opencv_distributions}"
+    # shellcheck disable=SC2086
+    "$PYTHON_BIN" -m pip uninstall -y $opencv_distributions || true
+  fi
+  remove_residual_cv2_package || true
   "$PYTHON_BIN" -m pip install --no-cache-dir "$OPENCV_PACKAGE"
   "$PYTHON_BIN" - <<'PY'
 import cv2
+assert int(cv2.__version__.split(".", 1)[0]) < 5, f"unsupported OpenCV major version: {cv2.__version__}"
 assert hasattr(cv2, "CascadeClassifier"), "OpenCV CascadeClassifier is unavailable"
 assert getattr(cv2, "data", None) is not None, "OpenCV data module is unavailable"
 assert cv2.data.haarcascades, "OpenCV haarcascades path is unavailable"
-print("opencv face detector ok")
+print(f"opencv face detector ok: {cv2.__version__}")
 PY
 }
 

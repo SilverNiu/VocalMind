@@ -13,6 +13,9 @@ def test_autodl_deploy_script_contains_required_backend_steps():
     assert "ensure_opencv_face_detector" in script
     assert "CascadeClassifier" in script
     assert "opencv-python-headless" in script
+    assert "opencv-python-headless>=4.8.0,<5" in script
+    assert "top_level.txt" in script
+    assert "shutil.rmtree" in script
     assert "requirements-audio.txt" in script
     assert "INSTALL_TORCH=\"${INSTALL_TORCH:-1}\"" in script
     assert "TORCH_PACKAGES=\"${TORCH_PACKAGES:-torch torchaudio}\"" in script
