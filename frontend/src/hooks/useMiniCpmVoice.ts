@@ -249,20 +249,26 @@ export function useMiniCpmVoice() {
     setLines([{ id: 'intro', role: 'system', text: '连接后直接说话，我会实时播放 MiniCPM 的回复。' }]);
     setStatus('connecting');
 
-    const { apiBase } = getBackendConfig();
-    const nextConfig = await fetchMiniCpmConfig(apiBase);
-    setConfig(nextConfig);
-    configRef.current = nextConfig;
+    try {
+      const { apiBase } = getBackendConfig();
+      const nextConfig = await fetchMiniCpmConfig(apiBase);
+      setConfig(nextConfig);
+      configRef.current = nextConfig;
 
-    const ws = new WebSocket(buildMiniCpmWebSocketUrl(apiBase, nextConfig.websocket_path));
-    wsRef.current = ws;
-    ws.addEventListener('open', () => setStatus('connecting'));
-    ws.addEventListener('message', handleServerMessage);
-    ws.addEventListener('error', () => {
-      appendLine('error', 'WebSocket 连接出错。');
+      const ws = new WebSocket(buildMiniCpmWebSocketUrl(apiBase, nextConfig.websocket_path));
+      wsRef.current = ws;
+      ws.addEventListener('open', () => setStatus('connecting'));
+      ws.addEventListener('message', handleServerMessage);
+      ws.addEventListener('error', () => {
+        appendLine('error', 'WebSocket 连接出错。');
+        setStatus('error');
+      });
+      ws.addEventListener('close', () => stop(false));
+    } catch (error) {
+      stop(true);
+      appendLine('error', `无法连接 MiniCPM 后端：${getMiniCpmStartErrorMessage(error)}`);
       setStatus('error');
-    });
-    ws.addEventListener('close', () => stop(false));
+    }
   }, [appendLine, handleServerMessage, stop]);
 
   useEffect(() => {
@@ -305,4 +311,12 @@ function calculateInputLevel(samples: Float32Array): number {
   }
   const rms = Math.sqrt(sum / samples.length);
   return Math.min(1.2, 0.35 + rms * 10);
+}
+
+function getMiniCpmStartErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('502')) {
+    return '配置接口返回 502，请确认 AutoDL 后端服务和 SSH 反向隧道都在运行。';
+  }
+  return message;
 }
