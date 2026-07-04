@@ -91,6 +91,30 @@ def test_nginx_reverse_proxy_script_matches_current_public_route():
     assert "systemctl reload nginx" in script
 
 
+def test_cloud_frontend_deploy_serves_static_frontend_and_proxies_api():
+    script = Path("scripts/deploy_cloud_frontend.sh").read_text(encoding="utf-8")
+
+    assert "WEB_ROOT=\"${WEB_ROOT:-/var/www/vocalmind}\"" in script
+    assert "FRONTEND_API_BASE=\"${FRONTEND_API_BASE:-http://${SERVER_NAME}:${PUBLIC_PORT}}\"" in script
+    assert "curl -fsSL https://deb.nodesource.com/setup_20.x" in script
+    assert "VITE_API_BASE=\"$FRONTEND_API_BASE\" \"${NPM_CMD[@]}\" run build" in script
+    assert "validate_web_root" in script
+    assert "refusing to replace unsafe WEB_ROOT" in script
+    assert "$SUDO cp -a \"$PROJECT_DIR/frontend/dist/.\" \"$WEB_ROOT/\"" in script
+    assert "root ${WEB_ROOT};" in script
+    assert "try_files \\$uri \\$uri/ /index.html;" in script
+    assert "location = /voice/minicpm" in script
+    assert "location /ws/" in script
+    assert "location ~ ^/(health|demo|voice|emotion|companion)(/|$)" in script
+    assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script
+    assert "proxy_set_header Upgrade \\$http_upgrade;" in script
+    assert 'proxy_set_header Connection "upgrade";' in script
+    assert "nginx -t" in script
+    assert "demo_video_overlay.py" not in script
+    assert "demo_service_overlay.py" not in script
+    assert "sounddevice" not in script
+
+
 def test_autodl_reverse_tunnel_script_matches_nginx_upstream():
     script = Path("scripts/start_autodl_reverse_tunnel.sh").read_text(encoding="utf-8")
 

@@ -372,6 +372,21 @@ ws://101.35.234.4:18080/ws/companion
 
 `scripts/setup_nginx_reverse_proxy.sh` 已配置 `Upgrade` / `Connection` 头，支持 WebSocket 反代。拉取新代码后建议在云服务器上重新执行一次该脚本。
 
+如果要把前端静态文件直接部署在云服务器上，而不是让 AutoDL 后端托管前端，推荐在云服务器执行：
+
+```bash
+sudo mkdir -p /opt/vocalmind
+sudo chown "$(id -u):$(id -g)" /opt/vocalmind
+git clone https://github.com/SilverNiu/VocalMind.git /opt/vocalmind/VocalMind || true
+cd /opt/vocalmind/VocalMind
+git pull origin main
+sudo -E SERVER_NAME=101.35.234.4 PUBLIC_PORT=18080 \
+  UPSTREAM_HOST=127.0.0.1 UPSTREAM_PORT=18000 \
+  bash scripts/deploy_cloud_frontend.sh
+```
+
+该脚本会构建 `frontend/dist`，发布到 `/var/www/vocalmind`，并配置 Nginx：`/` 走前端静态文件，`/health`、`/voice`、`/emotion`、`/companion`、`/ws` 等路径继续反代到 AutoDL 反向隧道。AutoDL 端仍然需要启动 `deploy_autodl_backend.sh` 和 `start_autodl_reverse_tunnel.sh`。
+
 脚本会使用 AutoDL 自带的 Miniconda 创建或复用 conda 环境：
 
 ```bash
