@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import wave
 
@@ -207,3 +208,97 @@ def test_companion_respond_uses_existing_emotion_and_local_fallback(monkeypatch)
     assert body["llm"]["mode"] == "fallback"
     assert body["llm"]["warning"]["code"] == "llm_key_missing"
     assert "diagnosis" in body["reply"].lower()
+
+
+def test_companion_websocket_returns_emotion_without_llm_by_default(monkeypatch):
+    app_module.clear_model_cache()
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/companion") as websocket:
+        websocket.send_json(
+            {
+                "user_text": "I feel tired.",
+                "audio_label": "sad",
+                "audio_confidence": 0.8,
+                "face_label": "neutral",
+                "face_confidence": 0.6,
+            }
+        )
+        body = websocket.receive_json()
+
+    assert body["ok"] is True
+    assert body["type"] == "companion_result"
+    assert body["audio_emotion"]["label"] == "sad"
+    assert body["face_emotion"]["label"] == "neutral"
+    assert body["fusion_emotion"]["source"] == "fusion"
+    assert body["reply"] is None
+    assert body["llm"]["mode"] == "skipped"
+
+
+def test_companion_websocket_returns_fallback_reply_when_requested(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app_module.clear_model_cache()
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/companion") as websocket:
+        websocket.send_json(
+            {
+                "user_text": "I feel tired.",
+                "audio_label": "sad",
+                "audio_confidence": 0.8,
+                "request_reply": True,
+            }
+        )
+        body = websocket.receive_json()
+
+    assert body["ok"] is True
+    assert body["reply"]
+    assert body["llm"]["mode"] == "fallback"
+    assert body["llm"]["warning"]["code"] == "llm_key_missing"
+
+
+def test_companion_websocket_decodes_base64_media_chunks(monkeypatch):
+    async def fake_audio_bytes(content, suffix):
+        assert content.startswith(b"RIFF")
+        assert suffix == ".wav"
+        return EmotionPrediction("audio", "calm", 0.7, {"calm": 0.7})
+
+    async def fake_face_bytes(content, suffix):
+        assert content.startswith(b"\xff\xd8")
+        assert suffix == ".jpg"
+        return EmotionPrediction("face", "happy", 0.9, {"happy": 0.9})
+
+    monkeypatch.setattr(app_module, "_predict_audio_bytes", fake_audio_bytes)
+    monkeypatch.setattr(app_module, "_predict_face_bytes", fake_face_bytes)
+    client = TestClient(app)
+
+    audio_base64 = base64.b64encode(_wav_bytes()).decode("ascii")
+    image_base64 = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8demo").decode("ascii")
+
+    with client.websocket_connect("/ws/companion") as websocket:
+        websocket.send_json(
+            {
+                "user_text": "Use the media chunks.",
+                "audio_base64": audio_base64,
+                "image_base64": image_base64,
+                "request_reply": False,
+            }
+        )
+        body = websocket.receive_json()
+
+    assert body["ok"] is True
+    assert body["audio_emotion"]["label"] == "calm"
+    assert body["face_emotion"]["label"] == "happy"
+
+
+def test_companion_websocket_returns_json_error_for_empty_text():
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/companion") as websocket:
+        websocket.send_json({"user_text": " "})
+        body = websocket.receive_json()
+
+    assert body["ok"] is False
+    assert body["type"] == "error"
+    assert body["error"]["code"] == "text_empty"

@@ -129,6 +129,7 @@ conda run -n torch1 python scripts/predict_face.py path\to\face.jpg
 - `POST /emotion/face`：上传 `file` 图片，先用 OpenCV Haar cascade 检测并裁剪最大人脸，再送入 EmotiEffLib。默认 `FACE_ENGINE=onnx`、`FACE_MODEL_NAME=mbf_va_mtl`，recognizer 首次请求后缓存复用。无人脸返回 `face_not_detected`。
 - `POST /emotion/fusion`：表单传 `audio_label/audio_confidence/face_label/face_confidence`，返回融合情绪。
 - `POST /companion/respond`：A 同学负责的演示聚合接口。表单传 `user_text`，可选上传 `audio_file`、`image_file`，也可直接传已有结果 `audio_label/audio_confidence`、`face_label/face_confidence`。返回 `audio_emotion`、`face_emotion`、`fusion_emotion`、`reply` 和 `llm` 调用状态。
+- `WebSocket /ws/companion`：推荐给前端实时视频通话效果使用。前端持续发送 JSON，小片段里包含 `user_text`、可选 `image_base64`、`audio_base64` 或已有情绪结果。默认 `request_reply=false`，只返回情绪，不调用 LLM；需要陪伴回复时再发 `request_reply=true`。
 
 `/companion/respond` 示例，不消耗 LLM request：
 
@@ -154,6 +155,34 @@ curl -X POST http://127.0.0.1:8000/companion/respond `
 ```
 
 常见错误码包括 `audio_empty`、`audio_too_short`、`audio_unreadable`、`image_empty`、`image_unreadable`、`face_not_detected`、`model_unavailable`、`llm_key_missing`。
+
+WebSocket 消息示例：
+
+```json
+{
+  "user_text": "我今天有点累",
+  "image_base64": "data:image/jpeg;base64,...",
+  "audio_base64": "UklGR...",
+  "audio_format": "wav",
+  "request_reply": false
+}
+```
+
+WebSocket 返回：
+
+```json
+{
+  "ok": true,
+  "type": "companion_result",
+  "audio_emotion": {"source": "audio", "label": "sad", "confidence": 0.8},
+  "face_emotion": {"source": "face", "label": "neutral", "confidence": 0.6},
+  "fusion_emotion": {"source": "fusion", "label": "sad", "confidence": 0.5},
+  "reply": null,
+  "llm": {"mode": "skipped", "reason": "request_reply is false"}
+}
+```
+
+前端建议每 1 秒发送一帧 JPEG，每 3-5 秒发送一段 16k 单声道 WAV。LLM 回复不要每个片段都请求，建议每 10 秒或情绪明显变化时把 `request_reply` 设为 `true`。
 
 ## A 同学模型说明
 
@@ -309,6 +338,14 @@ curl http://101.35.234.4:18080/health
 ```text
 http://101.35.234.4:18080
 ```
+
+WebSocket 地址填：
+
+```text
+ws://101.35.234.4:18080/ws/companion
+```
+
+`scripts/setup_nginx_reverse_proxy.sh` 已配置 `Upgrade` / `Connection` 头，支持 WebSocket 反代。拉取新代码后建议在云服务器上重新执行一次该脚本。
 
 脚本会使用 AutoDL 自带的 Miniconda 创建或复用 conda 环境：
 
@@ -491,10 +528,11 @@ conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101
 
 ```text
 1. getUserMedia({ video: true, audio: true }) 获取摄像头和麦克风。
-2. 每 1-2 秒从 video canvas 截一帧，作为 image_file 上传。
-3. 用 MediaRecorder 或 AudioWorklet 每 3-5 秒生成一个音频片段，作为 audio_file 上传。
-4. 发送 multipart/form-data 到 POST /companion/respond，字段包括 user_text、image_file、audio_file。
-5. 前端展示 audio_emotion、face_emotion、fusion_emotion 和 reply。
+2. 页面本地显示 video，视频通话画面不走 AutoDL。
+3. 每 1 秒从 canvas 截一帧 JPEG。
+4. 每 3-5 秒用 MediaRecorder 或 AudioWorklet 生成一段 16k 单声道 WAV。
+5. 通过 ws://101.35.234.4:18080/ws/companion 发送 JSON/base64 小片段。
+6. 大多数消息 request_reply=false，只刷新 emotion；需要回复时再 request_reply=true。
 ```
 
-当前后端接口是“分片上传文件”的准实时方案，不是 WebSocket 连续流。为了语音识别稳定，音频片段优先编码成 WAV；如果前端先用浏览器默认 `audio/webm`，需要确认服务器 FunASR 能解码，或后续在后端加 ffmpeg 转 WAV。
+当前后端采用“旁路 AI 分析”方案：AutoDL 不承载 WebRTC 媒体通话，只处理前端抽取的小片段。为了语音识别稳定，音频片段优先编码成 WAV；如果前端先用浏览器默认 `audio/webm`，需要确认服务器 FunASR 能解码，或后续在后端加 ffmpeg 转 WAV。

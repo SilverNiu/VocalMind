@@ -44,6 +44,8 @@ def test_nginx_reverse_proxy_script_matches_current_public_route():
     assert "UPSTREAM_HOST=\"${UPSTREAM_HOST:-127.0.0.1}\"" in script
     assert "UPSTREAM_PORT=\"${UPSTREAM_PORT:-18000}\"" in script
     assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script
+    assert "proxy_set_header Upgrade \\$http_upgrade;" in script
+    assert 'proxy_set_header Connection "upgrade";' in script
     assert "client_max_body_size" in script
     assert "nginx -t" in script
     assert "systemctl reload nginx" in script
