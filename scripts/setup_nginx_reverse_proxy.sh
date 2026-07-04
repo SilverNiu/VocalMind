@@ -8,6 +8,7 @@ UPSTREAM_PORT="${UPSTREAM_PORT:-18000}"
 SITE_NAME="${SITE_NAME:-vocalmind}"
 CLIENT_MAX_BODY_SIZE="${CLIENT_MAX_BODY_SIZE:-100M}"
 PROXY_TIMEOUT="${PROXY_TIMEOUT:-300s}"
+PROXY_WS_TIMEOUT="${PROXY_WS_TIMEOUT:-3600s}"
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -39,6 +40,23 @@ server {
     server_name ${SERVER_NAME};
 
     client_max_body_size ${CLIENT_MAX_BODY_SIZE};
+
+    location = /voice/minicpm {
+        proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_connect_timeout 30s;
+        proxy_read_timeout ${PROXY_WS_TIMEOUT};
+        proxy_send_timeout ${PROXY_WS_TIMEOUT};
+        proxy_buffering off;
+    }
 
     location / {
         proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};

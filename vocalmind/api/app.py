@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+from contextlib import suppress
 from functools import lru_cache
+import json
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -18,9 +21,9 @@ from vocalmind.llm import CompanionLLM
 from vocalmind.schema import EmotionPrediction
 
 try:
-    from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, File, Form, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
 except ImportError as exc:  # pragma: no cover - import-time guidance for optional dependency
     raise RuntimeError(
         "FastAPI service dependencies are missing. Install requirements-api.txt."
@@ -29,13 +32,23 @@ except ImportError as exc:  # pragma: no cover - import-time guidance for option
 
 app = FastAPI(title="VocalMind Emotion Companion Baseline")
 config = AppConfig.from_env()
+MINICPM_DEMO_PATH = Path(__file__).resolve().parent / "static" / "minicpm_voice.html"
+MINICPM_INPUT_SAMPLE_RATE = 16000
+MINICPM_OUTPUT_SAMPLE_RATE = 24000
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_allow_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-Id"],
 )
+
+FRONTEND_REQUEST_HEADERS = {
+    "x-client-name": "client_name",
+    "x-client-platform": "client_platform",
+    "x-request-id": "request_id",
+}
 
 
 @app.exception_handler(VocalMindError)
@@ -95,6 +108,84 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/demo/minicpm", response_class=HTMLResponse)
+def minicpm_demo_page() -> HTMLResponse:
+    return HTMLResponse(MINICPM_DEMO_PATH.read_text(encoding="utf-8"))
+
+
+@app.get("/voice/minicpm/config")
+def minicpm_voice_config() -> dict[str, object]:
+    return {
+        "demo_path": "/demo/minicpm",
+        "websocket_path": "/voice/minicpm",
+        "input_audio": {
+            "sample_rate": MINICPM_INPUT_SAMPLE_RATE,
+            "channels": 1,
+            "encoding": "float32_pcm_base64",
+        },
+        "output_audio": {
+            "sample_rate": MINICPM_OUTPUT_SAMPLE_RATE,
+            "channels": 1,
+            "encoding": "float32_pcm_base64",
+        },
+        "upstream_configured": bool(config.minicpm_realtime_url),
+        "auth_configured": bool(config.minicpm_api_key),
+    }
+
+
+@app.websocket("/voice/minicpm")
+async def minicpm_voice_proxy(client_ws: WebSocket) -> None:
+    await client_ws.accept()
+    upstream_ws = None
+    try:
+        upstream_ws = await _connect_minicpm_ws()
+    except Exception as exc:  # pragma: no cover - depends on external MiniCPM service
+        await _safe_client_send_json(
+            client_ws,
+            {
+                "type": "proxy.error",
+                "message": "Unable to connect to MiniCPM realtime API.",
+                "detail": str(exc),
+            },
+        )
+        await _safe_client_close(client_ws, code=1011)
+        return
+
+    ready = asyncio.Event()
+    tasks = [
+        asyncio.create_task(_client_to_minicpm(client_ws, upstream_ws, ready)),
+        asyncio.create_task(_minicpm_to_client(upstream_ws, client_ws, ready)),
+    ]
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        for task in done:
+            task.result()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        await _safe_client_send_json(
+            client_ws,
+            {
+                "type": "proxy.error",
+                "message": "MiniCPM realtime proxy failed.",
+                "detail": str(exc),
+            },
+        )
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        if upstream_ws is not None:
+            with suppress(Exception):
+                await upstream_ws.close()
+        await _safe_client_close(client_ws)
+
+
 @app.post("/emotion/fusion")
 def fusion_endpoint(
     audio_label: str = Form(...),
@@ -119,6 +210,8 @@ async def face_endpoint(file: UploadFile = File(...)) -> dict[str, object]:
 
 @app.post("/companion/respond")
 async def companion_respond_endpoint(
+    request: Request,
+    response: Response,
     user_text: str = Form(...),
     audio_file: Optional[UploadFile] = File(None),
     image_file: Optional[UploadFile] = File(None),
@@ -138,7 +231,13 @@ async def companion_respond_endpoint(
         else _prediction_from_form("face", face_label, face_confidence)
     )
 
-    return _build_companion_response(user_text, audio, face, request_reply=True)
+    response_payload = _build_companion_response(user_text, audio, face, request_reply=True)
+    request_meta = _frontend_request_meta(request)
+    if request_meta:
+        response_payload["request_meta"] = request_meta
+    if request_id := request_meta.get("request_id"):
+        response.headers["X-Request-Id"] = request_id
+    return response_payload
 
 
 @app.websocket("/ws/companion")
@@ -210,6 +309,14 @@ def _build_companion_response(
         "fusion_emotion": fusion.to_dict(),
         "reply": reply,
         "llm": llm_info,
+    }
+
+
+def _frontend_request_meta(request: Request) -> dict[str, str]:
+    return {
+        field_name: value
+        for header_name, field_name in FRONTEND_REQUEST_HEADERS.items()
+        if (value := request.headers.get(header_name))
     }
 
 
@@ -376,3 +483,117 @@ def _coerce_bool(value: object) -> bool:
 
 def _websocket_error(exc: VocalMindError) -> dict[str, object]:
     return {"ok": False, "type": "error", **exc.to_dict()}
+
+
+async def _connect_minicpm_ws() -> Any:
+    try:
+        import websockets
+    except ImportError as exc:  # pragma: no cover - dependency guidance
+        raise RuntimeError(
+            "websockets is required for MiniCPM realtime proxy. "
+            "Install requirements-api.txt."
+        ) from exc
+
+    headers = _minicpm_headers()
+    kwargs: dict[str, object] = {
+        "open_timeout": 20,
+        "ping_interval": 20,
+        "ping_timeout": 20,
+    }
+    if headers:
+        kwargs["additional_headers"] = headers
+
+    try:
+        return await websockets.connect(config.minicpm_realtime_url, **kwargs)
+    except TypeError:
+        if "additional_headers" in kwargs:
+            kwargs["extra_headers"] = kwargs.pop("additional_headers")
+        return await websockets.connect(config.minicpm_realtime_url, **kwargs)
+
+
+def _minicpm_headers() -> dict[str, str]:
+    if not config.minicpm_api_key:
+        return {}
+    return {"Authorization": f"Bearer {config.minicpm_api_key}"}
+
+
+async def _client_to_minicpm(
+    client_ws: WebSocket,
+    upstream_ws: Any,
+    ready: asyncio.Event,
+) -> None:
+    while True:
+        message = await client_ws.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+
+        text = message.get("text")
+        data = message.get("bytes")
+        if text is not None:
+            parsed = _loads_json(text)
+            if isinstance(parsed, dict) and parsed.get("type") == "proxy.close":
+                with suppress(Exception):
+                    await upstream_ws.send(json.dumps({"type": "session.close"}))
+                return
+            if isinstance(parsed, dict) and parsed.get("type") == "input.append":
+                await ready.wait()
+            await upstream_ws.send(text)
+            continue
+
+        if data is not None:
+            await ready.wait()
+            await upstream_ws.send(data)
+
+
+async def _minicpm_to_client(
+    upstream_ws: Any,
+    client_ws: WebSocket,
+    ready: asyncio.Event,
+) -> None:
+    async for raw in upstream_ws:
+        parsed = _loads_json(raw)
+        if isinstance(parsed, dict):
+            event_type = parsed.get("type")
+            if event_type == "session.queue_done":
+                await upstream_ws.send(
+                    json.dumps(_minicpm_session_init_message(), ensure_ascii=False)
+                )
+            elif event_type == "session.created":
+                ready.set()
+                await _safe_client_send_json(client_ws, {"type": "proxy.ready"})
+
+        if isinstance(raw, bytes):
+            await client_ws.send_bytes(raw)
+        else:
+            await client_ws.send_text(raw)
+
+
+def _minicpm_session_init_message() -> dict[str, object]:
+    return {
+        "type": "session.init",
+        "payload": {
+            "system_prompt": config.minicpm_system_prompt,
+            "config": {
+                "length_penalty": 1.1,
+            },
+        },
+    }
+
+
+def _loads_json(data: str | bytes) -> object | None:
+    try:
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+        return json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return None
+
+
+async def _safe_client_send_json(client_ws: WebSocket, payload: dict[str, object]) -> None:
+    with suppress(Exception):
+        await client_ws.send_json(payload)
+
+
+async def _safe_client_close(client_ws: WebSocket, code: int = 1000) -> None:
+    with suppress(Exception):
+        await client_ws.close(code=code)

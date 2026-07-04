@@ -130,6 +130,9 @@ conda run -n torch1 python scripts/predict_face.py path\to\face.jpg
 - `POST /emotion/fusion`：表单传 `audio_label/audio_confidence/face_label/face_confidence`，返回融合情绪。
 - `POST /companion/respond`：A 同学负责的演示聚合接口。表单传 `user_text`，可选上传 `audio_file`、`image_file`，也可直接传已有结果 `audio_label/audio_confidence`、`face_label/face_confidence`。返回 `audio_emotion`、`face_emotion`、`fusion_emotion`、`reply` 和 `llm` 调用状态。
 - `WebSocket /ws/companion`：推荐给前端实时视频通话效果使用。前端持续发送 JSON，小片段里包含 `user_text`、可选 `image_base64`、`audio_base64` 或已有情绪结果。默认 `request_reply=false`，只返回情绪，不调用 LLM；需要陪伴回复时再发 `request_reply=true`。
+- `GET /demo/minicpm`：MiniCPM-o 4.5 实时语音对话浏览器 demo。
+- `GET /voice/minicpm/config`：返回 MiniCPM 语音代理的前端 contract，不返回 API key。
+- `WebSocket /voice/minicpm`：后端代理到 MiniCPM-o 4.5 Realtime Audio Duplex API。浏览器 demo 上传 `16kHz mono float32 PCM base64`，上游返回 `24kHz mono float32 PCM base64`。
 
 `/companion/respond` 示例，不消耗 LLM request：
 
@@ -183,6 +186,12 @@ WebSocket 返回：
 ```
 
 前端建议每 1 秒发送一帧 JPEG，每 3-5 秒发送一段 16k 单声道 WAV。LLM 回复不要每个片段都请求，建议每 10 秒或情绪明显变化时把 `request_reply` 设为 `true`。
+
+MiniCPM 实时语音代理说明见 [MINICPM_REALTIME.md](MINICPM_REALTIME.md)。本地启动后可打开：
+
+```text
+http://127.0.0.1:8000/demo/minicpm
+```
 
 ## A 同学模型说明
 
@@ -433,6 +442,17 @@ bash scripts/deploy_autodl_backend.sh
 
 为了节省 request，也可以不设置 `LLM_API_KEY`，`/companion/respond` 会使用本地 fallback 回复。
 
+如需启用 MiniCPM-o 4.5 实时语音对话代理，可以在启动前设置：
+
+```bash
+export MINICPM_REALTIME_URL="wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
+export MINICPM_API_KEY="your-key-if-required"
+export MINICPM_SYSTEM_PROMPT="你是 VocalMind 的中文实时语音陪伴助手。请用自然、温柔、简短的中文回答，多倾听和共情，不做医学诊断。"
+bash scripts/deploy_autodl_backend.sh
+```
+
+如果 MiniCPM 网关不要求 key，可以不设置 `MINICPM_API_KEY`。
+
 AutoDL 控制台需要把容器内 `8000` 端口开放为公网服务。前端把 API base URL 配成 AutoDL 给出的公网地址即可，例如：
 
 ```text
@@ -443,10 +463,14 @@ https://xxxxxx.autodl.com
 
 ```text
 GET  /health
+GET  /demo/minicpm
+GET  /voice/minicpm/config
+WS   /voice/minicpm
 POST /emotion/audio
 POST /emotion/face
 POST /emotion/fusion
 POST /companion/respond
+WS   /ws/companion
 ```
 
 前端推荐优先调用 `/companion/respond`。不上传文件、只传已有情绪结果的测试命令：

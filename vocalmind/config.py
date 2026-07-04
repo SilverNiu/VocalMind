@@ -7,6 +7,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CORS_ALLOW_ORIGINS = ["*"]
+DEFAULT_MINICPM_REALTIME_URL = "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
+DEFAULT_MINICPM_SYSTEM_PROMPT = (
+    "你是 VocalMind 的中文实时语音陪伴助手。请用自然、温柔、简短的中文回答，"
+    "多倾听和共情，不做医学诊断。遇到自伤、危机或持续严重痛苦时，建议用户联系可信任的人或专业帮助。"
+)
 
 
 def _parse_csv_env(value: str | None, default: list[str]) -> list[str]:
@@ -30,6 +35,9 @@ class AppConfig:
     modelscope_cache_dir: Path = PROJECT_ROOT / "local_models" / "modelscope"
     face_model_dir: Path = PROJECT_ROOT / "local_models" / "face" / "affectnet_emotions"
     emotiefflib_path: Path = PROJECT_ROOT / "EmotiEffLib-main" / "EmotiEffLib-main"
+    minicpm_realtime_url: str = DEFAULT_MINICPM_REALTIME_URL
+    minicpm_api_key: str | None = None
+    minicpm_system_prompt: str = DEFAULT_MINICPM_SYSTEM_PROMPT
     cors_allow_origins: list[str] = field(
         default_factory=lambda: list(DEFAULT_CORS_ALLOW_ORIGINS)
     )
@@ -59,6 +67,15 @@ class AppConfig:
             ),
             emotiefflib_path=Path(
                 os.getenv("EMOTIEFFLIB_PATH", str(cls.emotiefflib_path))
+            ),
+            minicpm_realtime_url=os.getenv(
+                "MINICPM_REALTIME_URL",
+                cls.minicpm_realtime_url,
+            ),
+            minicpm_api_key=os.getenv("MINICPM_API_KEY") or None,
+            minicpm_system_prompt=os.getenv(
+                "MINICPM_SYSTEM_PROMPT",
+                cls.minicpm_system_prompt,
             ),
             cors_allow_origins=_parse_csv_env(
                 os.getenv("CORS_ALLOW_ORIGINS"),

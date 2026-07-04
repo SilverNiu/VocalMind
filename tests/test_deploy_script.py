@@ -34,6 +34,9 @@ def test_autodl_deploy_script_contains_required_backend_steps():
     assert "python3.10 -m venv" not in script
     assert "PUBLIC_API_URL=\"${PUBLIC_API_URL:-http://101.35.234.4:18080}\"" in script
     assert "scripts/start_autodl_reverse_tunnel.sh" in script
+    assert "MINICPM_REALTIME_URL" in script
+    assert "MINICPM_API_KEY" in script
+    assert "MINICPM_SYSTEM_PROMPT" in script
 
 
 def test_nginx_reverse_proxy_script_matches_current_public_route():
@@ -44,8 +47,11 @@ def test_nginx_reverse_proxy_script_matches_current_public_route():
     assert "UPSTREAM_HOST=\"${UPSTREAM_HOST:-127.0.0.1}\"" in script
     assert "UPSTREAM_PORT=\"${UPSTREAM_PORT:-18000}\"" in script
     assert "proxy_pass http://${UPSTREAM_HOST}:${UPSTREAM_PORT};" in script
+    assert "location = /voice/minicpm" in script
     assert "proxy_set_header Upgrade \\$http_upgrade;" in script
     assert 'proxy_set_header Connection "upgrade";' in script
+    assert "PROXY_WS_TIMEOUT=\"${PROXY_WS_TIMEOUT:-3600s}\"" in script
+    assert "proxy_buffering off" in script
     assert "client_max_body_size" in script
     assert "nginx -t" in script
     assert "systemctl reload nginx" in script

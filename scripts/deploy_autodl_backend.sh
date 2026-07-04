@@ -29,6 +29,9 @@ LOCAL_MODELS_DIR="${LOCAL_MODELS_DIR:-${PROJECT_DIR}/local_models}"
 MODELSCOPE_CACHE="${MODELSCOPE_CACHE:-${LOCAL_MODELS_DIR}/modelscope}"
 FACE_MODEL_DIR="${FACE_MODEL_DIR:-${LOCAL_MODELS_DIR}/face/affectnet_emotions}"
 EMOTIEFFLIB_PATH="${EMOTIEFFLIB_PATH:-${PROJECT_DIR}/EmotiEffLib-main/EmotiEffLib-main}"
+MINICPM_REALTIME_URL="${MINICPM_REALTIME_URL:-wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio}"
+MINICPM_API_KEY="${MINICPM_API_KEY:-}"
+MINICPM_SYSTEM_PROMPT="${MINICPM_SYSTEM_PROMPT:-你是 VocalMind 的中文实时语音陪伴助手。请用自然、温柔、简短的中文回答，多倾听和共情，不做医学诊断。遇到自伤、危机或持续严重痛苦时，建议用户联系可信任的人或专业帮助。}"
 
 find_conda() {
   if command -v conda >/dev/null 2>&1; then
@@ -247,6 +250,11 @@ LLM_MODEL_ID=${LLM_MODEL_ID:-deepseek-ai/DeepSeek-V4-Flash}
 LLM_BASE_URL=${LLM_BASE_URL:-https://api-inference.modelscope.cn/v1/}
 LLM_API_KEY=${LLM_API_KEY:-}
 EOF
+{
+  printf "MINICPM_REALTIME_URL=%q\n" "$MINICPM_REALTIME_URL"
+  printf "MINICPM_API_KEY=%q\n" "$MINICPM_API_KEY"
+  printf "MINICPM_SYSTEM_PROMPT=%q\n" "$MINICPM_SYSTEM_PROMPT"
+} >> "$PROJECT_DIR/.env.autodl"
 
 set -a
 source "$PROJECT_DIR/.env.autodl"

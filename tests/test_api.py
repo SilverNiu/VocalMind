@@ -52,6 +52,31 @@ def test_health_endpoint_allows_browser_frontend_origin():
     assert response.headers["access-control-allow-origin"] == "*"
 
 
+def test_minicpm_demo_page_is_served():
+    client = TestClient(app)
+
+    response = client.get("/demo/minicpm")
+
+    assert response.status_code == 200
+    assert "VocalMind" in response.text
+    assert "/voice/minicpm" in response.text
+
+
+def test_minicpm_voice_config_exposes_frontend_contract_without_key():
+    client = TestClient(app)
+
+    response = client.get("/voice/minicpm/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["demo_path"] == "/demo/minicpm"
+    assert body["websocket_path"] == "/voice/minicpm"
+    assert body["input_audio"]["sample_rate"] == 16000
+    assert body["input_audio"]["encoding"] == "float32_pcm_base64"
+    assert body["output_audio"]["sample_rate"] == 24000
+    assert "api_key" not in body
+
+
 def test_fusion_endpoint_returns_fused_prediction():
     client = TestClient(app)
 
@@ -208,6 +233,37 @@ def test_companion_respond_uses_existing_emotion_and_local_fallback(monkeypatch)
     assert body["llm"]["mode"] == "fallback"
     assert body["llm"]["warning"]["code"] == "llm_key_missing"
     assert "diagnosis" in body["reply"].lower()
+
+
+def test_companion_respond_returns_frontend_request_headers(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app_module.clear_model_cache()
+    client = TestClient(app)
+
+    response = client.post(
+        "/companion/respond",
+        headers={
+            "Origin": "http://127.0.0.1:3000",
+            "X-Client-Name": "VocalMind",
+            "X-Client-Platform": "web",
+            "X-Request-Id": "request-123",
+        },
+        data={
+            "user_text": "I feel stuck today.",
+            "audio_label": "sad",
+            "audio_confidence": "0.8",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] == "request-123"
+    assert response.headers["access-control-expose-headers"] == "X-Request-Id"
+    assert response.json()["request_meta"] == {
+        "client_name": "VocalMind",
+        "client_platform": "web",
+        "request_id": "request-123",
+    }
 
 
 def test_companion_websocket_returns_emotion_without_llm_by_default(monkeypatch):
