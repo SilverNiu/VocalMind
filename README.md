@@ -142,7 +142,8 @@ curl -X POST http://127.0.0.1:8000/companion/respond `
   -F "audio_label=sad" `
   -F "audio_confidence=0.8" `
   -F "face_label=neutral" `
-  -F "face_confidence=0.6"
+  -F "face_confidence=0.6" `
+  -F "request_reply=false"
 ```
 
 错误统一返回：
@@ -497,7 +498,7 @@ GET  /health
 GET  /demo/minicpm
 GET  /voice/minicpm/config
 WS   /voice/minicpm
-WS   /voice/minicpm?mode=video
+WS   /voice/minicpm?mode=audio
 POST /emotion/audio
 POST /emotion/face
 POST /emotion/fusion
@@ -571,20 +572,27 @@ conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35
 
 ### MiniCPM 本地摄像头 + 麦克风 Agent
 
-MiniCPM Realtime 推荐走本地 Agent：浏览器主应用只读取 `/voice/minicpm/config` 并展示启动命令，不再调用 `getUserMedia`。本地 Python 进程负责采集麦克风 float32 PCM 和摄像头 JPEG 帧，通过 `WS /voice/minicpm?mode=video` 发送给后端代理，再由后端连接 MiniCPM-o 4.5 Realtime。
+MiniCPM Realtime 推荐走本地 Agent：浏览器主应用优先调用本机 launcher 自动启动 Agent，launcher 不在线时才展示启动命令，不再调用 `getUserMedia`。本地 Python 进程负责采集麦克风 float32 PCM 和摄像头 JPEG 帧；MiniCPM 默认通过 `WS /voice/minicpm?mode=audio` 发送麦克风音频，摄像头 JPEG 和一段 WAV 通过 HTTP `/companion/respond` 发送给 AutoDL 的 face/audio 情绪模型。
 
 ```powershell
 conda run -n torch1 python -m pip install -r requirements-agent.txt
-conda run -n torch1 python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode video
+conda run -n torch1 python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode audio
+```
+
+前端按钮自动启动需要先在本机常驻 launcher；项目目录不固定时可设置 `VOCALMIND_HOME`，launcher 会自动定位并用同一个 Python 解释器启动 Agent：
+
+```powershell
+$env:VOCALMIND_HOME="F:\Competition\nextstep"
+conda run -n torch1 python scripts/local_agent_launcher.py
 ```
 
 如需使用本机已有的 `simpleHand` 环境：
 
 ```powershell
-conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode video
+conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode audio
 ```
 
-如需只跑语音、不发送摄像头帧：
+如需只跑语音、完全关闭本地摄像头采样：
 
 ```powershell
 conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode audio --no-camera

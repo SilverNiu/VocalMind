@@ -4,7 +4,9 @@ import {
   base64ToFloat32,
   buildMiniCpmWebSocketUrl,
   float32ToBase64,
+  getMiniCpmLauncherStartUrl,
   getMiniCpmConfigUrl,
+  startMiniCpmLocalAgent,
 } from './minicpmClient';
 
 describe('getMiniCpmConfigUrl', () => {
@@ -28,6 +30,48 @@ describe('buildMiniCpmWebSocketUrl', () => {
     assert.equal(
       buildMiniCpmWebSocketUrl('http://127.0.0.1:8000', '/voice/minicpm?mode=video'),
       'ws://127.0.0.1:8000/voice/minicpm?mode=video'
+    );
+  });
+});
+
+describe('local launcher helpers', () => {
+  const launcher = {
+    base_url: 'http://127.0.0.1:18990/',
+    start_path: '/start-minicpm-agent',
+    health_path: '/health',
+    stop_path: '/stop-minicpm-agent',
+    script: 'scripts/local_agent_launcher.py',
+  };
+
+  it('builds the launcher start URL without requiring a project path', () => {
+    assert.equal(
+      getMiniCpmLauncherStartUrl(launcher),
+      'http://127.0.0.1:18990/start-minicpm-agent'
+    );
+  });
+
+  it('posts the backend API base and MiniCPM mode to the local launcher', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({ ok: true, started: true, pid: 1234 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const result = await startMiniCpmLocalAgent(
+      launcher,
+      { api_base: 'http://101.35.234.4:18080', mode: 'audio' },
+      fetchImpl as typeof fetch
+    );
+
+    assert.equal(result.started, true);
+    assert.equal(requests[0].url, 'http://127.0.0.1:18990/start-minicpm-agent');
+    assert.equal(requests[0].init?.method, 'POST');
+    assert.equal(
+      requests[0].init?.body,
+      JSON.stringify({ api_base: 'http://101.35.234.4:18080', mode: 'audio' })
     );
   });
 });

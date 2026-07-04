@@ -33,7 +33,7 @@ from scripts.demo_service_overlay import (  # noqa: E402
 
 
 DEFAULT_MINICPM_WS_PATH = "/voice/minicpm"
-DEFAULT_MINICPM_MODE = "video"
+DEFAULT_MINICPM_MODE = "audio"
 DEFAULT_AUDIO_CHUNK_SECONDS = 0.24
 DEFAULT_VIDEO_FPS = 1.0
 DEFAULT_OUTPUT_SAMPLE_RATE = 24000
@@ -208,6 +208,19 @@ def build_input_append_message(
     return {"type": "input.append", "input": input_payload}
 
 
+def should_open_camera_capture(
+    *,
+    mode: str,
+    use_camera: bool,
+    emotion_sampling: bool,
+) -> bool:
+    return use_camera and (mode == "video" or emotion_sampling)
+
+
+def should_send_video_frames_to_minicpm(mode: str) -> bool:
+    return mode == "video"
+
+
 def record_microphone_float32(
     *,
     duration_seconds: float,
@@ -320,7 +333,15 @@ async def run_local_minicpm_agent(
         ) from exc
 
     ws_url = build_minicpm_ws_url(api_base, websocket_path, mode=mode)
-    camera = open_camera_capture(camera_index) if use_camera and mode == "video" else None
+    camera = (
+        open_camera_capture(camera_index)
+        if should_open_camera_capture(
+            mode=mode,
+            use_camera=use_camera,
+            emotion_sampling=emotion_sampling,
+        )
+        else None
+    )
     stats: dict[str, Any] = {
         "ok": True,
         "api_base": api_base,
@@ -332,6 +353,7 @@ async def run_local_minicpm_agent(
         "text_events_received": 0,
         "audio_events_received": 0,
         "emotion_sampling": emotion_sampling,
+        "emotion_frames_captured": 0,
         "emotion_requests_sent": 0,
         "emotion_errors": [],
         "last_emotion_response": None,
@@ -383,8 +405,10 @@ async def run_local_minicpm_agent(
                     )
                     if frame_jpeg:
                         last_emotion_frame_jpeg = frame_jpeg
-                        video_frames.append(base64.b64encode(frame_jpeg).decode("ascii"))
-                        stats["video_frames_sent"] += 1
+                        stats["emotion_frames_captured"] += 1
+                        if should_send_video_frames_to_minicpm(mode):
+                            video_frames.append(base64.b64encode(frame_jpeg).decode("ascii"))
+                            stats["video_frames_sent"] += 1
                     next_frame_time = now + frame_interval
 
                 await ws.send(
@@ -466,7 +490,7 @@ async def _receive_minicpm_messages(
             stats["errors"].append(detail)
             ready.set()
             print(f"MiniCPM proxy error: {detail}", file=sys.stderr)
-            continue
+            return
         if event_type == "session.queued":
             print("MiniCPM session queued.")
             continue

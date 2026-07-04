@@ -102,7 +102,7 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               className="h-12 px-7 rounded-full bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center gap-2"
             >
               <Terminal className="w-5 h-5" />
-              生成命令
+              Start Agent
             </button>
             <button
               onClick={handleEnd}
@@ -117,7 +117,9 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
         <GlassCard className="p-5 md:p-6 bg-white/70 border-white/80 min-h-[520px] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[18px] font-semibold text-slate-800">本地 Agent 状态</h2>
-            <span className="text-[12px] text-slate-400">WebSocket /voice/minicpm?mode=video</span>
+            <span className="text-[12px] text-slate-400">
+              WebSocket {config?.local_agent?.websocket_path || '/voice/minicpm?mode=audio'}
+            </span>
           </div>
           {agentCommand && (
             <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3">

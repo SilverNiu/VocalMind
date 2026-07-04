@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from scripts.local_minicpm_agent import (
+    _receive_minicpm_messages,
     append_emotion_audio_chunk,
     build_input_append_message,
     build_minicpm_ws_url,
@@ -14,17 +15,19 @@ from scripts.local_minicpm_agent import (
     buffered_emotion_audio_duration_seconds,
     drain_emotion_audio_wav,
     float32_samples_to_base64,
+    should_open_camera_capture,
+    should_send_video_frames_to_minicpm,
 )
 
 
-def test_local_minicpm_agent_defaults_to_video_mode_with_camera_and_microphone():
+def test_local_minicpm_agent_defaults_to_audio_mode_with_camera_emotion_sampling():
     args = build_parser().parse_args([])
 
     kwargs = build_run_kwargs(args)
 
     assert kwargs["api_base"] == "http://101.35.234.4:18080"
     assert kwargs["websocket_path"] == "/voice/minicpm"
-    assert kwargs["mode"] == "video"
+    assert kwargs["mode"] == "audio"
     assert kwargs["camera_index"] == 0
     assert kwargs["use_camera"] is True
     assert kwargs["mic_sample_rate"] == 16000
@@ -32,6 +35,15 @@ def test_local_minicpm_agent_defaults_to_video_mode_with_camera_and_microphone()
     assert kwargs["emotion_sampling"] is True
     assert kwargs["emotion_every_seconds"] == 3.0
     assert kwargs["emotion_audio_segment_seconds"] == 3.0
+
+
+def test_audio_mode_keeps_camera_for_server_emotion_but_not_minicpm_video():
+    assert should_open_camera_capture(
+        mode="audio",
+        use_camera=True,
+        emotion_sampling=True,
+    ) is True
+    assert should_send_video_frames_to_minicpm("audio") is False
 
 
 def test_local_minicpm_agent_can_run_audio_only():
@@ -101,6 +113,37 @@ def test_emotion_audio_buffer_drains_float32_chunks_to_uploadable_wav():
     assert wav_bytes.startswith(b"RIFF")
     assert b"WAVE" in wav_bytes[:16]
     assert buffer == []
+
+
+def test_receive_minicpm_messages_stops_after_proxy_error():
+    class FakeWebSocket:
+        def __init__(self):
+            self.calls = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"type":"proxy.error","detail":"upstream 404"}'
+            raise AssertionError("receiver should stop after proxy.error")
+
+    ready = __import__("asyncio").Event()
+    stats = {"errors": []}
+
+    __import__("asyncio").run(
+        _receive_minicpm_messages(
+            FakeWebSocket(),
+            ready=ready,
+            stats=stats,
+            playback=False,
+            output_sample_rate=24000,
+        )
+    )
+
+    assert ready.is_set()
+    assert stats["errors"] == ["upstream 404"]
 
 
 def test_agent_requirements_include_websocket_proxy_dependency():

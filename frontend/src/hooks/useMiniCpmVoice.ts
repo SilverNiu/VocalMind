@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react';
 import { getBackendConfig } from '../lib/backendClient';
-import { fetchMiniCpmConfig, MiniCpmConfig } from '../lib/minicpmClient';
+import {
+  fetchMiniCpmConfig,
+  MiniCpmConfig,
+  startMiniCpmLocalAgent,
+} from '../lib/minicpmClient';
 
 export interface MiniCpmTranscriptLine {
   id: string;
@@ -49,12 +53,47 @@ export function useMiniCpmVoice() {
       const { apiBase } = getBackendConfig();
       const nextConfig = await fetchMiniCpmConfig(apiBase);
       const localAgent = nextConfig.local_agent;
-      const mode = localAgent?.mode || 'video';
+      const mode = localAgent?.mode || 'audio';
       const script = localAgent?.script || 'scripts/local_minicpm_agent.py';
       const websocketPath = localAgent?.websocket_path || `${nextConfig.websocket_path}?mode=${mode}`;
       const command = `python ${script} --api-base ${apiBase} --websocket-path "${websocketPath}" --mode ${mode}`;
+      const launcher = localAgent?.launcher;
+      const launcherCommand = `python ${launcher?.script || 'scripts/local_agent_launcher.py'}`;
 
       setConfig(nextConfig);
+      if (launcher) {
+        try {
+          const launcherResult = await startMiniCpmLocalAgent(launcher, {
+            api_base: apiBase,
+            mode,
+          });
+          setAgentCommand(null);
+          setInputLevel(1);
+          setStatus('listening');
+          setLines([
+            {
+              id: 'ready',
+              role: 'system',
+              text: launcherResult.already_running
+                ? 'Local Agent is already running from the launcher.'
+                : 'Local Agent started from the launcher. Camera, microphone, and emotion sampling are running locally.',
+            },
+          ]);
+          return;
+        } catch (launcherError) {
+          const launcherMessage = launcherError instanceof Error ? launcherError.message : String(launcherError);
+          setAgentCommand(launcherCommand);
+          setStatus('error');
+          setLines([
+            {
+              id: 'launcher-missing',
+              role: 'error',
+              text: `Local launcher is not responding. Run the command below once, then click start again. ${launcherMessage}`,
+            },
+          ]);
+          return;
+        }
+      }
       setAgentCommand(command);
       setInputLevel(1);
       setStatus('listening');

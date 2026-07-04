@@ -41,8 +41,8 @@ MINICPM_DEMO_PATH = Path(__file__).resolve().parent / "static" / "minicpm_voice.
 MINICPM_INPUT_SAMPLE_RATE = 16000
 MINICPM_OUTPUT_SAMPLE_RATE = 24000
 MINICPM_DEFAULT_MODE = "audio"
-MINICPM_LOCAL_AGENT_MODE = "video"
-MINICPM_SUPPORTED_MODES = {MINICPM_DEFAULT_MODE, MINICPM_LOCAL_AGENT_MODE}
+MINICPM_LOCAL_AGENT_MODE = "audio"
+MINICPM_SUPPORTED_MODES = {MINICPM_DEFAULT_MODE, "video"}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_allow_origins,
@@ -141,6 +141,13 @@ def minicpm_voice_config() -> dict[str, object]:
                 "disable_flag": "--no-emotion-sampling",
                 "recommended_interval_seconds": 3.0,
                 "audio_segment_seconds": 3.0,
+            },
+            "launcher": {
+                "base_url": "http://127.0.0.1:18990",
+                "start_path": "/start-minicpm-agent",
+                "health_path": "/health",
+                "stop_path": "/stop-minicpm-agent",
+                "script": "scripts/local_agent_launcher.py",
             },
         },
         "input_audio": {

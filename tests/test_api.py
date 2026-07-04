@@ -106,11 +106,13 @@ def test_minicpm_voice_config_exposes_frontend_contract_without_key():
     body = response.json()
     assert body["demo_path"] == "/demo/minicpm"
     assert body["websocket_path"] == "/voice/minicpm"
-    assert body["local_agent"]["websocket_path"] == "/voice/minicpm?mode=video"
-    assert body["local_agent"]["mode"] == "video"
+    assert body["local_agent"]["websocket_path"] == "/voice/minicpm?mode=audio"
+    assert body["local_agent"]["mode"] == "audio"
     assert body["local_agent"]["emotion_sampling"]["enabled"] is True
     assert body["local_agent"]["emotion_sampling"]["endpoint"] == "/companion/respond"
     assert body["local_agent"]["emotion_sampling"]["inference"] == "server"
+    assert body["local_agent"]["launcher"]["base_url"] == "http://127.0.0.1:18990"
+    assert body["local_agent"]["launcher"]["start_path"] == "/start-minicpm-agent"
     assert body["input_audio"]["sample_rate"] == 16000
     assert body["input_audio"]["encoding"] == "float32_pcm_base64"
     assert body["input_video"]["encoding"] == "jpeg_base64"

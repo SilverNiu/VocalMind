@@ -12,11 +12,20 @@ export interface MiniCpmVideoContract {
   recommended_fps: number;
 }
 
+export interface MiniCpmLocalLauncherContract {
+  base_url: string;
+  start_path: string;
+  health_path: string;
+  stop_path: string;
+  script: string;
+}
+
 export interface MiniCpmLocalAgentContract {
   websocket_path: string;
   mode: 'audio' | 'video';
   script: string;
   description: string;
+  launcher?: MiniCpmLocalLauncherContract;
 }
 
 export interface MiniCpmConfig {
@@ -51,6 +60,50 @@ export async function fetchMiniCpmConfig(
   }
 
   return await response.json() as MiniCpmConfig;
+}
+
+export interface MiniCpmLauncherStartPayload {
+  api_base: string;
+  mode: 'audio' | 'video';
+}
+
+export interface MiniCpmLauncherStartResponse {
+  ok: boolean;
+  started?: boolean;
+  already_running?: boolean;
+  pid?: number;
+  project_root?: string;
+  error?: string;
+  message?: string;
+}
+
+export function getMiniCpmLauncherStartUrl(launcher: MiniCpmLocalLauncherContract): string {
+  return `${normalizeBaseUrl(launcher.base_url)}${launcher.start_path}`;
+}
+
+export async function startMiniCpmLocalAgent(
+  launcher: MiniCpmLocalLauncherContract,
+  payload: MiniCpmLauncherStartPayload,
+  fetchImpl: typeof fetch = fetch
+): Promise<MiniCpmLauncherStartResponse> {
+  const response = await fetchImpl(getMiniCpmLauncherStartUrl(launcher), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Local launcher request failed: ${response.status}`);
+  }
+
+  const data = await response.json() as MiniCpmLauncherStartResponse;
+  if (!data.ok) {
+    throw new Error(data.message || data.error || 'Local launcher failed to start agent.');
+  }
+  return data;
 }
 
 export function buildMiniCpmWebSocketUrl(
