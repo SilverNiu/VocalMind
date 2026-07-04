@@ -252,6 +252,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def close_launcher(server: Any, state: LauncherState) -> dict[str, object]:
+    agent_result = state.stop_agent()
+    server.server_close()
+    return {"ok": True, "agent": agent_result}
+
+
 def main() -> int:
     args = build_parser().parse_args()
     try:
@@ -280,7 +286,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     finally:
-        server.server_close()
+        close_launcher(server, state)
     return 0
 
 

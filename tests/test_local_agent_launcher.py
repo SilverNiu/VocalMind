@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from scripts.local_agent_launcher import (
     LauncherState,
     build_agent_command,
+    close_launcher,
     find_project_root,
     make_handler,
 )
@@ -141,3 +142,40 @@ def test_launcher_shutdown_endpoint_stops_http_server(tmp_path):
             server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_close_launcher_stops_child_agent_before_closing_server(tmp_path):
+    project_root = tmp_path / "VocalMind"
+    scripts_dir = project_root / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "local_minicpm_agent.py").write_text("# agent", encoding="utf-8")
+
+    class FakeProcess:
+        pid = 4321
+
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+    class FakeServer:
+        def __init__(self):
+            self.closed = False
+
+        def server_close(self):
+            self.closed = True
+
+    process = FakeProcess()
+    state = LauncherState(spawn=lambda command, cwd: process)
+    state.start_minicpm_agent(project_root=project_root, api_base="http://127.0.0.1:8000")
+    server = FakeServer()
+
+    result = close_launcher(server, state)
+
+    assert result["agent"]["stopped"] is True
+    assert process.terminated is True
+    assert server.closed is True
