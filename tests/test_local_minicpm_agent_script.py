@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
+from threading import Lock
 
 import numpy as np
 
@@ -9,6 +11,7 @@ from scripts.local_minicpm_agent import (
     _receive_minicpm_messages,
     append_minicpm_text_delta,
     append_emotion_audio_chunk,
+    append_ring_audio_chunk,
     build_input_append_message,
     build_minicpm_realtime_ws_url,
     build_minicpm_ws_url,
@@ -17,8 +20,13 @@ from scripts.local_minicpm_agent import (
     build_status_snapshot,
     base64_to_float32_samples,
     buffered_emotion_audio_duration_seconds,
+    collect_audio_chunk_from_queue,
     drain_emotion_audio_wav,
     float32_samples_to_base64,
+    make_microphone_stream_callback,
+    close_microphone_input_stream,
+    open_microphone_input_stream,
+    ring_audio_buffer_to_wav,
     should_open_camera_capture,
     should_send_video_frames_to_minicpm,
 )
@@ -146,6 +154,118 @@ def test_emotion_audio_buffer_drains_float32_chunks_to_uploadable_wav():
     assert wav_bytes.startswith(b"RIFF")
     assert b"WAVE" in wav_bytes[:16]
     assert buffer == []
+
+
+def test_stream_callback_copies_audio_to_queue_and_ring_buffer():
+    async def run_callback():
+        loop = asyncio.get_running_loop()
+        audio_queue = asyncio.Queue()
+        ring_buffer = []
+        callback = make_microphone_stream_callback(
+            loop=loop,
+            audio_queue=audio_queue,
+            ring_buffer=ring_buffer,
+            max_ring_samples=4,
+        )
+        original = np.asarray([[0.1], [0.2], [0.3]], dtype=np.float32)
+
+        callback(original, len(original), None, None)
+        original[:] = 0
+        queued = await asyncio.wait_for(audio_queue.get(), timeout=1)
+
+        return queued, ring_buffer
+
+    queued, ring_buffer = asyncio.run(run_callback())
+
+    np.testing.assert_allclose(queued, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(ring_buffer[0], [0.1, 0.2, 0.3])
+
+
+def test_ring_audio_buffer_keeps_only_recent_samples():
+    ring_buffer = []
+
+    append_ring_audio_chunk(ring_buffer, np.asarray([1, 2, 3], dtype=np.float32), max_samples=5)
+    append_ring_audio_chunk(ring_buffer, np.asarray([4, 5, 6, 7], dtype=np.float32), max_samples=5)
+
+    assert np.concatenate(ring_buffer).tolist() == [3, 4, 5, 6, 7]
+
+
+def test_ring_audio_buffer_exports_recent_audio_as_wav():
+    ring_buffer = [
+        np.asarray([0.0, 0.1], dtype=np.float32),
+        np.asarray([0.2, 0.3], dtype=np.float32),
+    ]
+
+    wav_bytes = ring_audio_buffer_to_wav(ring_buffer, sample_rate=16000)
+
+    assert wav_bytes.startswith(b"RIFF")
+    assert b"WAVE" in wav_bytes[:16]
+
+
+def test_collect_audio_chunk_from_queue_aggregates_target_duration():
+    async def collect():
+        queue = asyncio.Queue()
+        await queue.put(np.asarray([0.0, 0.1], dtype=np.float32))
+        await queue.put(np.asarray([0.2, 0.3, 0.4], dtype=np.float32))
+
+        return await collect_audio_chunk_from_queue(
+            queue,
+            sample_rate=10,
+            duration_seconds=0.4,
+        )
+
+    audio = asyncio.run(collect())
+
+    np.testing.assert_allclose(audio, [0.0, 0.1, 0.2, 0.3])
+
+
+def test_microphone_input_stream_opens_once_and_closes(monkeypatch):
+    created = []
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.started = False
+            self.stopped = False
+            self.closed = False
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+        def close(self):
+            self.closed = True
+
+    class FakeSoundDevice:
+        @staticmethod
+        def InputStream(**kwargs):
+            stream = FakeStream(**kwargs)
+            created.append(stream)
+            return stream
+
+    monkeypatch.setitem(sys.modules, "sounddevice", FakeSoundDevice)
+
+    async def run_stream():
+        stream = open_microphone_input_stream(
+            loop=asyncio.get_running_loop(),
+            audio_queue=asyncio.Queue(),
+            ring_buffer=[],
+            ring_lock=Lock(),
+            max_ring_samples=1600,
+            sample_rate=16000,
+            channels=1,
+            device=None,
+        )
+        close_microphone_input_stream(stream)
+
+    asyncio.run(run_stream())
+
+    assert len(created) == 1
+    assert created[0].started is True
+    assert created[0].stopped is True
+    assert created[0].closed is True
 
 
 def test_status_snapshot_exposes_cpm_messages_and_emotion_modalities():

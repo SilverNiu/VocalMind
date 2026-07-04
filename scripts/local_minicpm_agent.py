@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -267,6 +268,123 @@ def drain_emotion_audio_wav(buffer: list[Any], *, sample_rate: int) -> bytes:
     return pcm_float32_to_wav_bytes(audio, sample_rate=sample_rate)
 
 
+def normalize_audio_samples(samples: Any) -> Any:
+    import numpy as np
+
+    array = np.asarray(samples, dtype=np.float32)
+    if array.ndim == 2:
+        array = array.mean(axis=1, dtype=np.float32)
+    if array.ndim != 1:
+        raise ValueError(f"Expected mono or multi-channel audio, got shape {array.shape!r}.")
+    return array.astype(np.float32, copy=True)
+
+
+def append_ring_audio_chunk(ring_buffer: list[Any], samples: Any, *, max_samples: int) -> None:
+    import numpy as np
+
+    if max_samples <= 0:
+        ring_buffer.clear()
+        return
+
+    chunk = normalize_audio_samples(samples)
+    if chunk.size == 0:
+        return
+    ring_buffer.append(chunk)
+
+    total_samples = sum(len(item) for item in ring_buffer)
+    if total_samples <= max_samples:
+        return
+
+    recent = np.concatenate(ring_buffer)[-max_samples:].astype(np.float32, copy=False)
+    ring_buffer[:] = [recent]
+
+
+def ring_audio_buffer_to_wav(ring_buffer: list[Any], *, sample_rate: int) -> bytes:
+    import numpy as np
+
+    audio = (
+        np.concatenate(ring_buffer).astype(np.float32, copy=False)
+        if ring_buffer
+        else np.asarray([], dtype=np.float32)
+    )
+    return pcm_float32_to_wav_bytes(audio, sample_rate=sample_rate)
+
+
+def make_microphone_stream_callback(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    audio_queue: asyncio.Queue[Any],
+    ring_buffer: list[Any],
+    max_ring_samples: int,
+    ring_lock: Lock | None = None,
+):
+    def enqueue_chunk(chunk: Any) -> None:
+        if audio_queue.full():
+            try:
+                audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        audio_queue.put_nowait(chunk)
+
+    def callback(indata: Any, frames: int, time_info: Any, status: Any) -> None:
+        del frames, time_info
+        if status:
+            print(f"Microphone stream status: {status}", file=sys.stderr)
+        chunk = normalize_audio_samples(indata)
+        if ring_lock is None:
+            append_ring_audio_chunk(ring_buffer, chunk, max_samples=max_ring_samples)
+        else:
+            with ring_lock:
+                append_ring_audio_chunk(ring_buffer, chunk, max_samples=max_ring_samples)
+        loop.call_soon_threadsafe(enqueue_chunk, chunk)
+
+    return callback
+
+
+async def collect_audio_chunk_from_queue(
+    audio_queue: asyncio.Queue[Any],
+    *,
+    sample_rate: int,
+    duration_seconds: float,
+    pending_chunks: list[Any] | None = None,
+) -> Any:
+    import numpy as np
+
+    if sample_rate <= 0:
+        raise ValueError("Sample rate must be greater than 0.")
+    if duration_seconds <= 0:
+        raise ValueError("Audio chunk duration must be greater than 0.")
+
+    target_samples = max(1, int(round(duration_seconds * sample_rate)))
+    chunks = pending_chunks if pending_chunks is not None else []
+    collected: list[Any] = []
+    collected_samples = 0
+
+    while collected_samples < target_samples:
+        if chunks:
+            chunk = chunks.pop(0)
+        else:
+            chunk = await audio_queue.get()
+        chunk = normalize_audio_samples(chunk)
+        if chunk.size == 0:
+            continue
+
+        need = target_samples - collected_samples
+        if len(chunk) > need:
+            collected.append(chunk[:need])
+            collected_samples += need
+            if pending_chunks is not None:
+                chunks.insert(0, chunk[need:])
+            break
+
+        collected.append(chunk)
+        collected_samples += len(chunk)
+
+    if not collected:
+        return np.asarray([], dtype=np.float32)
+    return np.concatenate(collected).astype(np.float32, copy=False)
+
+
 def build_input_append_message(
     *,
     audio_base64: str,
@@ -370,28 +488,43 @@ def write_status_snapshot(status_file: Path | None, stats: dict[str, Any]) -> No
         print(f"Status snapshot write failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
-def record_microphone_float32(
+def open_microphone_input_stream(
     *,
-    duration_seconds: float,
+    loop: asyncio.AbstractEventLoop,
+    audio_queue: asyncio.Queue[Any],
+    ring_buffer: list[Any],
+    ring_lock: Lock,
+    max_ring_samples: int,
     sample_rate: int,
     channels: int,
     device: str | None,
 ) -> Any:
-    if duration_seconds <= 0:
-        raise ValueError("Audio chunk duration must be greater than 0.")
-
     import sounddevice as sd
 
-    frames = max(1, int(round(duration_seconds * sample_rate)))
-    audio = sd.rec(
-        frames,
+    stream = sd.InputStream(
         samplerate=sample_rate,
         channels=channels,
         dtype="float32",
         device=device,
+        callback=make_microphone_stream_callback(
+            loop=loop,
+            audio_queue=audio_queue,
+            ring_buffer=ring_buffer,
+            ring_lock=ring_lock,
+            max_ring_samples=max_ring_samples,
+        ),
     )
-    sd.wait()
-    return audio
+    stream.start()
+    return stream
+
+
+def close_microphone_input_stream(stream: Any | None) -> None:
+    if stream is None:
+        return
+    try:
+        stream.stop()
+    finally:
+        stream.close()
 
 
 def open_camera_capture(camera_index: int):
@@ -549,6 +682,7 @@ async def run_local_minicpm_agent(
     }
     write_status_snapshot(status_file, stats)
 
+    microphone_stream = None
     try:
         async with connect_minicpm_websocket(websockets, ws_url, headers=ws_headers) as ws:
             ready = asyncio.Event()
@@ -567,24 +701,37 @@ async def run_local_minicpm_agent(
             if stats["errors"]:
                 raise RuntimeError(stats["errors"][-1])
 
+            audio_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=200)
+            pending_audio_chunks: list[Any] = []
+            microphone_ring_buffer: list[Any] = []
+            microphone_ring_lock = Lock()
+            microphone_stream = open_microphone_input_stream(
+                loop=asyncio.get_running_loop(),
+                audio_queue=audio_queue,
+                ring_buffer=microphone_ring_buffer,
+                ring_lock=microphone_ring_lock,
+                max_ring_samples=max(
+                    1,
+                    int(round(emotion_audio_segment_seconds * mic_sample_rate)),
+                ),
+                sample_rate=mic_sample_rate,
+                channels=mic_channels,
+                device=mic_device,
+            )
             start_time = time.monotonic()
             next_frame_time = 0.0
             frame_interval = 1.0 / max(camera_fps, 0.001)
             next_emotion_time = start_time + max(emotion_every_seconds, 0.001)
-            emotion_audio_buffer: list[Any] = []
             emotion_tasks: set[asyncio.Task[None]] = set()
             last_emotion_frame_jpeg: bytes | None = None
 
             while max_seconds is None or time.monotonic() - start_time < max_seconds:
-                audio = await asyncio.to_thread(
-                    record_microphone_float32,
-                    duration_seconds=audio_chunk_seconds,
+                audio = await collect_audio_chunk_from_queue(
+                    audio_queue,
                     sample_rate=mic_sample_rate,
-                    channels=mic_channels,
-                    device=mic_device,
+                    duration_seconds=audio_chunk_seconds,
+                    pending_chunks=pending_audio_chunks,
                 )
-                if emotion_sampling:
-                    append_emotion_audio_chunk(emotion_audio_buffer, audio)
 
                 video_frames: list[str] = []
                 now = time.monotonic()
@@ -613,19 +760,21 @@ async def run_local_minicpm_agent(
                 )
                 stats["audio_chunks_sent"] += 1
 
-                emotion_audio_seconds = buffered_emotion_audio_duration_seconds(
-                    emotion_audio_buffer,
-                    sample_rate=mic_sample_rate,
-                )
+                with microphone_ring_lock:
+                    emotion_audio_seconds = buffered_emotion_audio_duration_seconds(
+                        microphone_ring_buffer,
+                        sample_rate=mic_sample_rate,
+                    )
                 if (
                     emotion_sampling
                     and now >= next_emotion_time
                     and emotion_audio_seconds >= emotion_audio_segment_seconds
                 ):
-                    audio_wav = drain_emotion_audio_wav(
-                        emotion_audio_buffer,
-                        sample_rate=mic_sample_rate,
-                    )
+                    with microphone_ring_lock:
+                        audio_wav = ring_audio_buffer_to_wav(
+                            microphone_ring_buffer,
+                            sample_rate=mic_sample_rate,
+                        )
                     task = asyncio.create_task(
                         post_emotion_sample(
                             api_base=api_base,
@@ -651,6 +800,7 @@ async def run_local_minicpm_agent(
     finally:
         stats["running"] = False
         write_status_snapshot(status_file, stats)
+        close_microphone_input_stream(microphone_stream)
         if camera is not None:
             camera.release()
 
