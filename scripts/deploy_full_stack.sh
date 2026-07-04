@@ -13,6 +13,7 @@ INSTALL_NODEJS="${INSTALL_NODEJS:-1}"
 CONDA_NODE_ENV="${CONDA_NODE_ENV:-vocalmind-node}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 NPM_STRICT_SSL="${NPM_STRICT_SSL:-true}"
+NPM_SELF_SIGNED_RETRY="${NPM_SELF_SIGNED_RETRY:-1}"
 NPM_CMD=()
 
 find_conda() {
@@ -60,8 +61,7 @@ build_frontend() {
 
   cd "$FRONTEND_DIR"
   echo "Installing frontend dependencies in ${FRONTEND_DIR}."
-  echo "Using npm registry: ${NPM_REGISTRY} (strict-ssl=${NPM_STRICT_SSL})."
-  "${NPM_CMD[@]}" ci --no-audit --no-fund --registry "$NPM_REGISTRY" --strict-ssl="$NPM_STRICT_SSL"
+  install_frontend_dependencies
   echo "Building frontend with VITE_API_BASE=${FRONTEND_API_BASE}."
   VITE_API_BASE="$FRONTEND_API_BASE" "${NPM_CMD[@]}" run build
 
@@ -70,6 +70,38 @@ build_frontend() {
     exit 1
   fi
   echo "Frontend build ready: ${FRONTEND_DIR}/dist/index.html"
+}
+
+install_frontend_dependencies() {
+  local npm_log
+  npm_log="$(mktemp)"
+
+  echo "Using npm registry: ${NPM_REGISTRY} (strict-ssl=${NPM_STRICT_SSL})."
+  set +e
+  run_npm_ci "$NPM_STRICT_SSL" 2>&1 | tee "$npm_log"
+  local npm_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$npm_status" -eq 0 ]]; then
+    rm -f "$npm_log"
+    return 0
+  fi
+
+  if [[ "$NPM_SELF_SIGNED_RETRY" == "1" && "$NPM_STRICT_SSL" == "true" ]] \
+    && grep -q "SELF_SIGNED_CERT_IN_CHAIN" "$npm_log"; then
+    echo "WARN: npm registry TLS chain is self-signed in this environment; retrying once with strict-ssl=false." >&2
+    rm -f "$npm_log"
+    run_npm_ci false
+    return
+  fi
+
+  rm -f "$npm_log"
+  return "$npm_status"
+}
+
+run_npm_ci() {
+  local strict_ssl="$1"
+  "${NPM_CMD[@]}" ci --no-audit --no-fund --registry "$NPM_REGISTRY" --strict-ssl="$strict_ssl"
 }
 
 ensure_node() {

@@ -48,6 +48,7 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
     assert "CONDA_NODE_ENV=\"${CONDA_NODE_ENV:-vocalmind-node}\"" in script
     assert "NPM_REGISTRY=\"${NPM_REGISTRY:-https://registry.npmmirror.com}\"" in script
     assert "NPM_STRICT_SSL=\"${NPM_STRICT_SSL:-true}\"" in script
+    assert "NPM_SELF_SIGNED_RETRY=\"${NPM_SELF_SIGNED_RETRY:-1}\"" in script
     assert "ensure_node" in script
     assert "conda_env_prefix" in script
     assert "prepend_path_once" in script
@@ -55,7 +56,12 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
     assert "conda-forge \"nodejs>=20\"" in script
     assert "apt-get install -y nodejs npm" in script
     assert "\"$node_env_prefix/bin/npm\"" in script
-    assert "\"${NPM_CMD[@]}\" ci --no-audit --no-fund --registry \"$NPM_REGISTRY\" --strict-ssl=\"$NPM_STRICT_SSL\"" in script
+    assert "install_frontend_dependencies" in script
+    assert "run_npm_ci \"$NPM_STRICT_SSL\"" in script
+    assert "SELF_SIGNED_CERT_IN_CHAIN" in script
+    assert "retrying once with strict-ssl=false" in script
+    assert "run_npm_ci false" in script
+    assert "\"${NPM_CMD[@]}\" ci --no-audit --no-fund --registry \"$NPM_REGISTRY\" --strict-ssl=\"$strict_ssl\"" in script
     assert "Installing frontend dependencies" in script
     assert "Using npm registry" in script
     assert "Building frontend with VITE_API_BASE" in script
