@@ -103,6 +103,7 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
     agentCommand,
     agentStatus,
     config,
+    debugEntries,
     emotionStatus,
     inputLevel,
     isActive,
@@ -203,14 +204,14 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
             <button
               onClick={() => void start()}
               disabled={isActive}
-              className="flex h-12 items-center gap-2 rounded-lg bg-blue-500 px-6 font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="flex h-12 items-center gap-2 whitespace-nowrap rounded-lg bg-blue-500 px-6 font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <Terminal className="h-5 w-5" />
               {meta.startLabel}
             </button>
             <button
               onClick={() => void handleEnd()}
-              className="flex h-12 items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-5 font-medium text-rose-500 transition-colors hover:bg-rose-100"
+              className="flex h-12 items-center gap-2 whitespace-nowrap rounded-lg border border-rose-100 bg-rose-50 px-5 font-medium text-rose-500 transition-colors hover:bg-rose-100"
             >
               <PhoneOff className="h-5 w-5" />
               结束
@@ -264,8 +265,39 @@ export function MiniCpmVoiceView({ mode, onEnd }: MiniCpmVoiceViewProps) {
               </div>
             ))}
           </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-950/90 px-4 py-3 shadow-inner">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="text-[13px] font-medium text-slate-100">启动返回值调试</span>
+              <span className="text-[11px] text-slate-400">{debugEntries.length} 条</span>
+            </div>
+            <div className="max-h-[150px] space-y-3 overflow-y-auto pr-1">
+              {debugEntries.length === 0 ? (
+                <p className="text-[12px] leading-relaxed text-slate-400">
+                  点击开始后，配置接口和本地 launcher 的原始返回值会显示在这里。
+                </p>
+              ) : (
+                debugEntries.map(entry => (
+                  <div key={entry.id} className="rounded-md border border-white/10 bg-white/[0.04] p-3">
+                    <div className="mb-2 text-[12px] font-medium text-cyan-200">{entry.label}</div>
+                    <pre className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-200">
+                      {formatDebugPayload(entry.payload)}
+                    </pre>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </GlassCard>
       </div>
     </div>
   );
+}
+
+function formatDebugPayload(payload: unknown): string {
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
 }

@@ -18,6 +18,12 @@ export interface MiniCpmTranscriptLine {
   text: string;
 }
 
+export interface MiniCpmDebugEntry {
+  id: string;
+  label: string;
+  payload: unknown;
+}
+
 export type MiniCpmStatus =
   | 'idle'
   | 'connecting'
@@ -82,6 +88,18 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
   const [agentCommand, setAgentCommand] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<MiniCpmLocalAgentStatus | null>(null);
   const [emotionStatus, setEmotionStatus] = useState<MiniCpmEmotionStatus | null>(null);
+  const [debugEntries, setDebugEntries] = useState<MiniCpmDebugEntry[]>([]);
+
+  const appendDebugEntry = useCallback((label: string, payload: unknown) => {
+    setDebugEntries(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        label,
+        payload,
+      },
+    ]);
+  }, []);
 
   useEffect(() => {
     if (status === 'idle') {
@@ -110,6 +128,7 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
     await stop(false);
     setStatus('connecting');
     setAgentCommand(null);
+    setDebugEntries([]);
     setLines([
       {
         id: 'loading',
@@ -121,10 +140,14 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
     try {
       const { apiBase } = getBackendConfig();
       const nextConfig = await fetchMiniCpmConfig(apiBase);
+      appendDebugEntry('GET /voice/minicpm/config', nextConfig);
       const localAgent = nextConfig.local_agent;
       const script = localAgent?.script || 'scripts/local_minicpm_agent.py';
-      const websocketPath = `${nextConfig.websocket_path}?mode=${sessionMode}`;
-      const directRealtimeUrl = localAgent?.minicpm_realtime_url;
+      const websocketPath = withMiniCpmMode(
+        localAgent?.websocket_path || nextConfig.websocket_path,
+        sessionMode,
+      );
+      const directRealtimeUrl = withMiniCpmMode(localAgent?.minicpm_realtime_url, sessionMode);
       const command = directRealtimeUrl
         ? `python ${script} --api-base ${apiBase} --mode ${sessionMode} --minicpm-realtime-url "${directRealtimeUrl}"`
         : `python ${script} --api-base ${apiBase} --websocket-path "${websocketPath}" --mode ${sessionMode}`;
@@ -134,11 +157,18 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
       setConfig(nextConfig);
       if (launcher) {
         try {
+          const launcherPayload = {
+            api_base: apiBase,
+            mode: sessionMode,
+            minicpm_realtime_url: directRealtimeUrl,
+          };
+          appendDebugEntry('POST local launcher /start payload', launcherPayload);
           const launcherResult = await startMiniCpmLocalAgent(launcher, {
             api_base: apiBase,
             mode: sessionMode,
-            minicpm_realtime_url: localAgent?.minicpm_realtime_url,
+            minicpm_realtime_url: directRealtimeUrl,
           });
+          appendDebugEntry('POST local launcher /start response', launcherResult);
           setAgentCommand(null);
           setInputLevel(1);
           setStatus('listening');
@@ -154,6 +184,9 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
           return;
         } catch (launcherError) {
           const launcherMessage = launcherError instanceof Error ? launcherError.message : String(launcherError);
+          appendDebugEntry('POST local launcher /start error', {
+            message: launcherMessage,
+          });
           setAgentCommand(launcherCommand);
           setStatus('error');
           setLines([
@@ -167,6 +200,9 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
         }
       }
       setAgentCommand(command);
+      appendDebugEntry('manual local agent command', {
+        command,
+      });
       setInputLevel(1);
       setStatus('listening');
       setLines([
@@ -178,6 +214,9 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      appendDebugEntry('MiniCPM start error', {
+        message,
+      });
       setStatus('error');
       setLines([
         {
@@ -187,7 +226,7 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
         },
       ]);
     }
-  }, [sessionMode, stop]);
+  }, [appendDebugEntry, sessionMode, stop]);
 
   const isActive = status !== 'idle' && status !== 'error';
 
@@ -250,6 +289,7 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
     agentCommand,
     agentStatus,
     config,
+    debugEntries,
     emotionStatus,
     inputLevel,
     isActive,
@@ -259,4 +299,21 @@ export function useMiniCpmVoice(sessionMode: MiniCpmSessionMode) {
     status,
     stop,
   };
+}
+
+function withMiniCpmMode(value: string | undefined, mode: MiniCpmSessionMode): string | undefined {
+  if (!value) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    url.searchParams.set('mode', mode);
+    if (value.startsWith('/')) {
+      return `${url.pathname}${url.search}`;
+    }
+    return url.toString();
+  } catch {
+    const [path, query = ''] = value.split('?');
+    const params = new URLSearchParams(query);
+    params.set('mode', mode);
+    return `${path}?${params.toString()}`;
+  }
 }
