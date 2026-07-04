@@ -11,6 +11,8 @@ FRONTEND_DIR="${FRONTEND_DIR:-${PROJECT_DIR}/frontend}"
 RUN_FRONTEND_BUILD="${RUN_FRONTEND_BUILD:-1}"
 INSTALL_NODEJS="${INSTALL_NODEJS:-1}"
 CONDA_NODE_ENV="${CONDA_NODE_ENV:-vocalmind-node}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+NPM_STRICT_SSL="${NPM_STRICT_SSL:-true}"
 NPM_CMD=()
 
 find_conda() {
@@ -58,7 +60,8 @@ build_frontend() {
 
   cd "$FRONTEND_DIR"
   echo "Installing frontend dependencies in ${FRONTEND_DIR}."
-  "${NPM_CMD[@]}" ci --no-audit --no-fund
+  echo "Using npm registry: ${NPM_REGISTRY} (strict-ssl=${NPM_STRICT_SSL})."
+  "${NPM_CMD[@]}" ci --no-audit --no-fund --registry "$NPM_REGISTRY" --strict-ssl="$NPM_STRICT_SSL"
   echo "Building frontend with VITE_API_BASE=${FRONTEND_API_BASE}."
   VITE_API_BASE="$FRONTEND_API_BASE" "${NPM_CMD[@]}" run build
 

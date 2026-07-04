@@ -46,6 +46,8 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
     assert "FRONTEND_DIR=\"${FRONTEND_DIR:-${PROJECT_DIR}/frontend}\"" in script
     assert "INSTALL_NODEJS=\"${INSTALL_NODEJS:-1}\"" in script
     assert "CONDA_NODE_ENV=\"${CONDA_NODE_ENV:-vocalmind-node}\"" in script
+    assert "NPM_REGISTRY=\"${NPM_REGISTRY:-https://registry.npmmirror.com}\"" in script
+    assert "NPM_STRICT_SSL=\"${NPM_STRICT_SSL:-true}\"" in script
     assert "ensure_node" in script
     assert "conda_env_prefix" in script
     assert "prepend_path_once" in script
@@ -53,8 +55,9 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
     assert "conda-forge \"nodejs>=20\"" in script
     assert "apt-get install -y nodejs npm" in script
     assert "\"$node_env_prefix/bin/npm\"" in script
-    assert "\"${NPM_CMD[@]}\" ci --no-audit --no-fund" in script
+    assert "\"${NPM_CMD[@]}\" ci --no-audit --no-fund --registry \"$NPM_REGISTRY\" --strict-ssl=\"$NPM_STRICT_SSL\"" in script
     assert "Installing frontend dependencies" in script
+    assert "Using npm registry" in script
     assert "Building frontend with VITE_API_BASE" in script
     assert "VITE_API_BASE=\"$FRONTEND_API_BASE\" \"${NPM_CMD[@]}\" run build" in script
     assert "dist/index.html" in script
