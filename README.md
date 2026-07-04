@@ -223,10 +223,17 @@ cd /root/autodl-tmp/VocalMind
 CORS_ALLOW_ORIGINS="*" PORT=8000 bash scripts/deploy_autodl_backend.sh
 ```
 
-如需指定 AutoDL 上的 Python 环境：
+脚本会使用 AutoDL 自带的 Miniconda 创建或复用 conda 环境：
 
 ```bash
-PYTHON_BIN=/root/miniconda3/envs/torch1/bin/python bash scripts/deploy_autodl_backend.sh
+conda create -y -n vocalmind python=3.11 pip
+```
+
+如果 `vocalmind` 已存在但不是 Python 3.11，先删除后重跑：
+
+```bash
+conda env remove -n vocalmind
+bash scripts/deploy_autodl_backend.sh
 ```
 
 如需提前下载语音模型到项目本地目录，而不是用户 home 缓存：

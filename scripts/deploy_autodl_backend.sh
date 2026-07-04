@@ -7,7 +7,10 @@ REPO_URL="${REPO_URL:-https://github.com/SilverNiu/VocalMind.git}"
 BRANCH="${BRANCH:-main}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
-PYTHON_BIN="${PYTHON_BIN:-python}"
+PYTHON_BIN_OVERRIDE="${PYTHON_BIN:-}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
+CONDA_ENV_NAME="${CONDA_ENV_NAME:-vocalmind}"
+CREATE_CONDA_ENV="${CREATE_CONDA_ENV:-1}"
 
 INSTALL_API="${INSTALL_API:-1}"
 INSTALL_FACE="${INSTALL_FACE:-1}"
@@ -20,6 +23,56 @@ LOCAL_MODELS_DIR="${LOCAL_MODELS_DIR:-${PROJECT_DIR}/local_models}"
 MODELSCOPE_CACHE="${MODELSCOPE_CACHE:-${LOCAL_MODELS_DIR}/modelscope}"
 FACE_MODEL_DIR="${FACE_MODEL_DIR:-${LOCAL_MODELS_DIR}/face/affectnet_emotions}"
 EMOTIEFFLIB_PATH="${EMOTIEFFLIB_PATH:-${PROJECT_DIR}/EmotiEffLib-main/EmotiEffLib-main}"
+
+find_conda() {
+  if command -v conda >/dev/null 2>&1; then
+    command -v conda
+    return 0
+  fi
+
+  for candidate in /root/miniconda3/bin/conda /root/anaconda3/bin/conda /opt/conda/bin/conda; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_python_env() {
+  if [[ -n "$PYTHON_BIN_OVERRIDE" ]]; then
+    PYTHON_BIN="$PYTHON_BIN_OVERRIDE"
+    return
+  fi
+
+  if [[ "$CREATE_CONDA_ENV" != "1" ]]; then
+    PYTHON_BIN="${PYTHON_BIN:-python}"
+    return
+  fi
+
+  local conda_bin
+  conda_bin="$(find_conda || true)"
+  if [[ -z "$conda_bin" ]]; then
+    echo "ERROR: conda was not found. AutoDL images should provide /root/miniconda3/bin/conda." >&2
+    exit 1
+  fi
+
+  if ! "$conda_bin" run -n "$CONDA_ENV_NAME" python -c "import sys" >/dev/null 2>&1; then
+    "$conda_bin" create -y -n "$CONDA_ENV_NAME" "python=${PYTHON_VERSION}" pip
+  fi
+
+  local existing_version
+  existing_version="$("$conda_bin" run -n "$CONDA_ENV_NAME" python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' | tr -d '\r')"
+  if [[ "$existing_version" != "$PYTHON_VERSION" ]]; then
+    echo "ERROR: conda env '$CONDA_ENV_NAME' uses Python $existing_version, expected $PYTHON_VERSION." >&2
+    echo "ERROR: run 'conda env remove -n $CONDA_ENV_NAME' or set CONDA_ENV_NAME to a new env name." >&2
+    exit 1
+  fi
+
+  PYTHON_BIN="$("$conda_bin" run -n "$CONDA_ENV_NAME" python -c 'import sys; print(sys.executable)' | tr -d '\r')"
+  "$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel
+}
 
 mkdir -p "$WORKDIR"
 
@@ -35,6 +88,8 @@ else
 fi
 
 cd "$PROJECT_DIR"
+ensure_python_env
+echo "Using Python: $("$PYTHON_BIN" --version) at $PYTHON_BIN"
 
 if [[ "$INSTALL_API" == "1" ]]; then
   "$PYTHON_BIN" -m pip install --no-cache-dir -r requirements-api.txt -r requirements-core.txt
