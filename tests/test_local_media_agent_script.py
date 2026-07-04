@@ -40,6 +40,7 @@ def test_local_media_agent_uses_http_companion_endpoint_without_browser_websocke
 def test_agent_requirements_include_local_capture_dependencies():
     requirements = Path("requirements-agent.txt").read_text(encoding="utf-8")
 
-    assert "opencv-python" in requirements
+    assert "numpy>=1.24,<2" in requirements
+    assert "opencv-python>=4.8.0,<4.12" in requirements
     assert "sounddevice" in requirements
     assert "imageio-ffmpeg" in requirements
