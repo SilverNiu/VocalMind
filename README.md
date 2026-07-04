@@ -182,11 +182,18 @@ git config --global user.name "Junyuan Niu"
 git config --global user.email "niujunyuan126@gmail.com"
 ```
 
-远程仓库：
+远程仓库现在使用 GitHub，默认分支是 `main`：
 
 ```powershell
-git remote add origin https://gitee.com/hongwei_33/VocalMind.git
-git push -u origin master
+git remote add origin https://github.com/SilverNiu/VocalMind.git
+git branch -M main
+git push -u origin main
 ```
 
-如果本机 `git` 不在 PATH，可先安装 Git for Windows，或把 Git 可执行文件加入 PATH。推送到 Gitee 通常还需要登录凭证或 personal access token。
+如果要保留原 Gitee 地址作为备用 remote，可使用：
+
+```powershell
+git remote add gitee https://gitee.com/hongwei_33/VocalMind.git
+```
+
+如果本机 `git` 不在 PATH，可先安装 Git for Windows，或把 Git 可执行文件加入 PATH。推送到 GitHub 通常需要浏览器登录、GitHub CLI 登录，或 personal access token。
