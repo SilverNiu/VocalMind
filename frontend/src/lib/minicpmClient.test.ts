@@ -23,6 +23,13 @@ describe('buildMiniCpmWebSocketUrl', () => {
       'wss://ai-health-app.online/voice/minicpm'
     );
   });
+
+  it('preserves the MiniCPM realtime mode query for local-agent video sessions', () => {
+    assert.equal(
+      buildMiniCpmWebSocketUrl('http://127.0.0.1:8000', '/voice/minicpm?mode=video'),
+      'ws://127.0.0.1:8000/voice/minicpm?mode=video'
+    );
+  });
 });
 
 describe('float32/base64 conversion', () => {

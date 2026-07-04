@@ -6,10 +6,25 @@ export interface MiniCpmAudioContract {
   encoding: string;
 }
 
+export interface MiniCpmVideoContract {
+  encoding: string;
+  field: string;
+  recommended_fps: number;
+}
+
+export interface MiniCpmLocalAgentContract {
+  websocket_path: string;
+  mode: 'audio' | 'video';
+  script: string;
+  description: string;
+}
+
 export interface MiniCpmConfig {
   demo_path: string;
   websocket_path: string;
+  local_agent?: MiniCpmLocalAgentContract;
   input_audio: MiniCpmAudioContract;
+  input_video?: MiniCpmVideoContract;
   output_audio: MiniCpmAudioContract;
   upstream_configured: boolean;
   auth_configured: boolean;
@@ -38,11 +53,22 @@ export async function fetchMiniCpmConfig(
   return await response.json() as MiniCpmConfig;
 }
 
-export function buildMiniCpmWebSocketUrl(apiBase: string, websocketPath: string): string {
+export function buildMiniCpmWebSocketUrl(
+  apiBase: string,
+  websocketPath: string,
+  mode?: 'audio' | 'video'
+): string {
   const base = new URL(normalizeBaseUrl(apiBase));
+  const endpoint = new URL(
+    websocketPath.startsWith('/') ? websocketPath : `/${websocketPath}`,
+    base
+  );
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
-  base.pathname = websocketPath.startsWith('/') ? websocketPath : `/${websocketPath}`;
-  base.search = '';
+  base.pathname = endpoint.pathname;
+  base.search = endpoint.search;
+  if (mode) {
+    base.searchParams.set('mode', mode);
+  }
   base.hash = '';
   return base.toString();
 }

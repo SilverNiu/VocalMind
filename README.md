@@ -497,6 +497,7 @@ GET  /health
 GET  /demo/minicpm
 GET  /voice/minicpm/config
 WS   /voice/minicpm
+WS   /voice/minicpm?mode=video
 POST /emotion/audio
 POST /emotion/face
 POST /emotion/fusion
@@ -566,6 +567,27 @@ conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35
 
 ```powershell
 conda run -n torch1 python scripts/local_media_agent.py --api-base http://101.35.234.4:18080 --no-mic
+```
+
+### MiniCPM 本地摄像头 + 麦克风 Agent
+
+MiniCPM Realtime 推荐走本地 Agent：浏览器主应用只读取 `/voice/minicpm/config` 并展示启动命令，不再调用 `getUserMedia`。本地 Python 进程负责采集麦克风 float32 PCM 和摄像头 JPEG 帧，通过 `WS /voice/minicpm?mode=video` 发送给后端代理，再由后端连接 MiniCPM-o 4.5 Realtime。
+
+```powershell
+conda run -n torch1 python -m pip install -r requirements-agent.txt
+conda run -n torch1 python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode video
+```
+
+如需使用本机已有的 `simpleHand` 环境：
+
+```powershell
+conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode video
+```
+
+如需只跑语音、不发送摄像头帧：
+
+```powershell
+conda run -n simpleHand python scripts/local_minicpm_agent.py --api-base http://101.35.234.4:18080 --mode audio --no-camera
 ```
 
 底层服务调用 demo 仍可直接运行，适合调试单帧/分段请求：

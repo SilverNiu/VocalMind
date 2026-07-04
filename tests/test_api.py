@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from vocalmind.api import app as app_module
 from vocalmind.api.app import app
+from vocalmind.config import AppConfig
 from vocalmind.face.emotieff_adapter import NoFaceDetectedError
 from vocalmind.schema import EmotionPrediction
 
@@ -105,10 +106,34 @@ def test_minicpm_voice_config_exposes_frontend_contract_without_key():
     body = response.json()
     assert body["demo_path"] == "/demo/minicpm"
     assert body["websocket_path"] == "/voice/minicpm"
+    assert body["local_agent"]["websocket_path"] == "/voice/minicpm?mode=video"
+    assert body["local_agent"]["mode"] == "video"
     assert body["input_audio"]["sample_rate"] == 16000
     assert body["input_audio"]["encoding"] == "float32_pcm_base64"
+    assert body["input_video"]["encoding"] == "jpeg_base64"
+    assert body["input_video"]["field"] == "video_frames"
     assert body["output_audio"]["sample_rate"] == 24000
     assert "api_key" not in body
+
+
+def test_minicpm_realtime_url_can_switch_to_video_mode(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "config",
+        AppConfig(minicpm_realtime_url="wss://example.test/v1/realtime?mode=audio&foo=bar"),
+    )
+
+    assert (
+        app_module._minicpm_realtime_url("video")
+        == "wss://example.test/v1/realtime?foo=bar&mode=video"
+    )
+
+
+def test_minicpm_mode_from_query_rejects_unknown_mode():
+    with pytest.raises(app_module.VocalMindError) as exc_info:
+        app_module._minicpm_mode_from_query("camera")
+
+    assert exc_info.value.code == "minicpm_mode_invalid"
 
 
 def test_fusion_endpoint_returns_fused_prediction():

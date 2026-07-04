@@ -10,6 +10,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from vocalmind.audio import Emotion2VecAudioRecognizer
 from vocalmind.audio.emotion2vec_adapter import validate_audio_file
@@ -39,6 +40,9 @@ FRONTEND_RESERVED_PREFIXES = {"health", "demo", "voice", "emotion", "companion",
 MINICPM_DEMO_PATH = Path(__file__).resolve().parent / "static" / "minicpm_voice.html"
 MINICPM_INPUT_SAMPLE_RATE = 16000
 MINICPM_OUTPUT_SAMPLE_RATE = 24000
+MINICPM_DEFAULT_MODE = "audio"
+MINICPM_LOCAL_AGENT_MODE = "video"
+MINICPM_SUPPORTED_MODES = {MINICPM_DEFAULT_MODE, MINICPM_LOCAL_AGENT_MODE}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_allow_origins,
@@ -122,10 +126,21 @@ def minicpm_voice_config() -> dict[str, object]:
     return {
         "demo_path": "/demo/minicpm",
         "websocket_path": "/voice/minicpm",
+        "local_agent": {
+            "websocket_path": f"/voice/minicpm?mode={MINICPM_LOCAL_AGENT_MODE}",
+            "mode": MINICPM_LOCAL_AGENT_MODE,
+            "script": "scripts/local_minicpm_agent.py",
+            "description": "Local Python agent captures camera and microphone instead of browser media APIs.",
+        },
         "input_audio": {
             "sample_rate": MINICPM_INPUT_SAMPLE_RATE,
             "channels": 1,
             "encoding": "float32_pcm_base64",
+        },
+        "input_video": {
+            "encoding": "jpeg_base64",
+            "field": "video_frames",
+            "recommended_fps": 1,
         },
         "output_audio": {
             "sample_rate": MINICPM_OUTPUT_SAMPLE_RATE,
@@ -140,9 +155,16 @@ def minicpm_voice_config() -> dict[str, object]:
 @app.websocket("/voice/minicpm")
 async def minicpm_voice_proxy(client_ws: WebSocket) -> None:
     await client_ws.accept()
+    try:
+        mode = _minicpm_mode_from_query(client_ws.query_params.get("mode"))
+    except VocalMindError as exc:
+        await _safe_client_send_json(client_ws, {"type": "proxy.error", **exc.to_dict()})
+        await _safe_client_close(client_ws, code=1008)
+        return
+
     upstream_ws = None
     try:
-        upstream_ws = await _connect_minicpm_ws()
+        upstream_ws = await _connect_minicpm_ws(mode=mode)
     except Exception as exc:  # pragma: no cover - depends on external MiniCPM service
         await _safe_client_send_json(
             client_ws,
@@ -158,7 +180,7 @@ async def minicpm_voice_proxy(client_ws: WebSocket) -> None:
     ready = asyncio.Event()
     tasks = [
         asyncio.create_task(_client_to_minicpm(client_ws, upstream_ws, ready)),
-        asyncio.create_task(_minicpm_to_client(upstream_ws, client_ws, ready)),
+        asyncio.create_task(_minicpm_to_client(upstream_ws, client_ws, ready, mode)),
     ]
     try:
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -489,7 +511,7 @@ def _websocket_error(exc: VocalMindError) -> dict[str, object]:
     return {"ok": False, "type": "error", **exc.to_dict()}
 
 
-async def _connect_minicpm_ws() -> Any:
+async def _connect_minicpm_ws(mode: str | None = None) -> Any:
     try:
         import websockets
     except ImportError as exc:  # pragma: no cover - dependency guidance
@@ -508,11 +530,37 @@ async def _connect_minicpm_ws() -> Any:
         kwargs["additional_headers"] = headers
 
     try:
-        return await websockets.connect(config.minicpm_realtime_url, **kwargs)
+        return await websockets.connect(_minicpm_realtime_url(mode), **kwargs)
     except TypeError:
         if "additional_headers" in kwargs:
             kwargs["extra_headers"] = kwargs.pop("additional_headers")
-        return await websockets.connect(config.minicpm_realtime_url, **kwargs)
+        return await websockets.connect(_minicpm_realtime_url(mode), **kwargs)
+
+
+def _minicpm_mode_from_query(value: str | None) -> str:
+    mode = (value or MINICPM_DEFAULT_MODE).strip().lower()
+    if mode not in MINICPM_SUPPORTED_MODES:
+        raise VocalMindError(
+            "Unsupported MiniCPM realtime mode.",
+            code="minicpm_mode_invalid",
+            status_code=400,
+            details={"mode": mode, "supported_modes": sorted(MINICPM_SUPPORTED_MODES)},
+        )
+    return mode
+
+
+def _minicpm_realtime_url(mode: str | None = None) -> str:
+    if not mode:
+        return config.minicpm_realtime_url
+
+    split = urlsplit(config.minicpm_realtime_url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(split.query, keep_blank_values=True)
+        if key.lower() != "mode"
+    ]
+    query.append(("mode", mode))
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
 def _minicpm_headers() -> dict[str, str]:
@@ -553,6 +601,7 @@ async def _minicpm_to_client(
     upstream_ws: Any,
     client_ws: WebSocket,
     ready: asyncio.Event,
+    mode: str = MINICPM_DEFAULT_MODE,
 ) -> None:
     async for raw in upstream_ws:
         parsed = _loads_json(raw)
@@ -564,7 +613,7 @@ async def _minicpm_to_client(
                 )
             elif event_type == "session.created":
                 ready.set()
-                await _safe_client_send_json(client_ws, {"type": "proxy.ready"})
+                await _safe_client_send_json(client_ws, {"type": "proxy.ready", "mode": mode})
 
         if isinstance(raw, bytes):
             await client_ws.send_bytes(raw)

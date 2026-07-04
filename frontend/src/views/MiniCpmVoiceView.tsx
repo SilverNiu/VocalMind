@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Headphones, Mic, PhoneOff, Radio, ShieldCheck, Volume2 } from 'lucide-react';
+import { Camera, Headphones, Mic, PhoneOff, Radio, ShieldCheck, Terminal, Volume2 } from 'lucide-react';
 import { GlassCard } from '../components/GlassCard';
 import { useMiniCpmVoice } from '../hooks/useMiniCpmVoice';
 
@@ -9,15 +9,16 @@ interface MiniCpmVoiceViewProps {
 
 const statusText = {
   idle: '未连接',
-  connecting: '连接中',
+  connecting: '读取配置',
   queued: '排队中',
-  listening: '正在听',
+  listening: 'Agent 就绪',
   speaking: '回复中',
-  error: '连接异常',
+  error: '配置异常',
 };
 
 export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
   const {
+    agentCommand,
     config,
     inputLevel,
     isActive,
@@ -41,7 +42,7 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               <div>
                 <p className="text-[13px] text-blue-500 font-medium mb-2">MiniCPM-o 4.5 Realtime</p>
                 <h1 className="text-[30px] md:text-[36px] leading-tight font-semibold text-[#1a2b4c]">
-                  实时语音陪伴
+                  本地实时陪伴
                 </h1>
               </div>
               <div className="px-3 py-2 rounded-full bg-white/80 border border-white text-[13px] text-slate-600 flex items-center gap-2">
@@ -67,6 +68,8 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               >
                 {status === 'speaking' ? (
                   <Volume2 className="w-16 h-16" />
+                ) : status === 'listening' ? (
+                  <Camera className="w-16 h-16" />
                 ) : (
                   <Mic className="w-16 h-16" />
                 )}
@@ -80,11 +83,13 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               </div>
               <div className="flex items-center gap-3">
                 <Headphones className="w-4 h-4 text-blue-500" />
-                建议佩戴耳机，避免模型语音再次被麦克风收进去。
+                摄像头和麦克风由本地 Python Agent 采集，浏览器不再申请媒体权限。
               </div>
               {config && (
                 <div className="text-[12px] text-slate-400 pt-1">
-                  输入 {config.input_audio.sample_rate}Hz / 输出 {config.output_audio.sample_rate}Hz
+                  输入 {config.input_audio.sample_rate}Hz 音频
+                  {config.input_video ? ` + ${config.input_video.encoding} 视频帧` : ''}
+                  {' '} / 输出 {config.output_audio.sample_rate}Hz
                 </div>
               )}
             </div>
@@ -96,8 +101,8 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               disabled={isActive}
               className="h-12 px-7 rounded-full bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center gap-2"
             >
-              <Mic className="w-5 h-5" />
-              开始对话
+              <Terminal className="w-5 h-5" />
+              生成命令
             </button>
             <button
               onClick={handleEnd}
@@ -111,9 +116,20 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
 
         <GlassCard className="p-5 md:p-6 bg-white/70 border-white/80 min-h-[520px] flex flex-col">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[18px] font-semibold text-slate-800">实时转写与回复</h2>
-            <span className="text-[12px] text-slate-400">WebSocket /voice/minicpm</span>
+            <h2 className="text-[18px] font-semibold text-slate-800">本地 Agent 状态</h2>
+            <span className="text-[12px] text-slate-400">WebSocket /voice/minicpm?mode=video</span>
           </div>
+          {agentCommand && (
+            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3">
+              <div className="flex items-center gap-2 text-[13px] font-medium text-blue-600 mb-2">
+                <Terminal className="w-4 h-4" />
+                项目根目录运行
+              </div>
+              <code className="block whitespace-pre-wrap break-words text-[12px] leading-relaxed text-slate-700">
+                {agentCommand}
+              </code>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto pr-1 space-y-3">
             {lines.map(line => (
               <div
