@@ -92,6 +92,7 @@ ensure_node() {
     local node_env_prefix
     node_env_prefix="$(conda_env_prefix "$conda_bin" "$CONDA_NODE_ENV")"
     if [[ -n "$node_env_prefix" && -x "$node_env_prefix/bin/npm" && -x "$node_env_prefix/bin/node" ]]; then
+      prepend_path_once "$node_env_prefix/bin"
       NPM_CMD=("$node_env_prefix/bin/npm")
       echo "Using Node.js: $("$node_env_prefix/bin/node" --version)"
       echo "Using npm: $("${NPM_CMD[@]}" --version) at ${NPM_CMD[0]}"
@@ -134,6 +135,14 @@ conda_env_prefix() {
   local conda_bin="$1"
   local env_name="$2"
   "$conda_bin" env list | awk -v env="$env_name" '$1 == env {print $NF; exit}'
+}
+
+prepend_path_once() {
+  local path_entry="$1"
+  case ":$PATH:" in
+    *":${path_entry}:"*) ;;
+    *) export PATH="${path_entry}:$PATH" ;;
+  esac
 }
 
 ensure_repo

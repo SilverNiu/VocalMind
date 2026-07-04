@@ -48,6 +48,8 @@ def test_full_stack_deploy_script_builds_frontend_before_backend_start():
     assert "CONDA_NODE_ENV=\"${CONDA_NODE_ENV:-vocalmind-node}\"" in script
     assert "ensure_node" in script
     assert "conda_env_prefix" in script
+    assert "prepend_path_once" in script
+    assert "export PATH=\"${path_entry}:$PATH\"" in script
     assert "conda-forge \"nodejs>=20\"" in script
     assert "apt-get install -y nodejs npm" in script
     assert "\"$node_env_prefix/bin/npm\"" in script
