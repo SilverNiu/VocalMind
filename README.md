@@ -223,6 +223,93 @@ cd /root/autodl-tmp/VocalMind
 CORS_ALLOW_ORIGINS="*" PORT=8000 bash scripts/deploy_autodl_backend.sh
 ```
 
+### Nginx 反代 + SSH 反向隧道
+
+当前推荐链路：
+
+```text
+浏览器
+ -> http://101.35.234.4:18080
+ -> 云服务器 Nginx
+ -> 127.0.0.1:18000
+ -> SSH 反向隧道
+ -> AutoDL 127.0.0.1:8000
+ -> FastAPI
+```
+
+云服务器上配置 Nginx 反代：
+
+```bash
+cd /root
+git clone https://github.com/SilverNiu/VocalMind.git || true
+cd VocalMind
+git pull origin main
+sudo bash scripts/setup_nginx_reverse_proxy.sh
+```
+
+默认配置是：
+
+```text
+SERVER_NAME=101.35.234.4
+PUBLIC_PORT=18080
+UPSTREAM_HOST=127.0.0.1
+UPSTREAM_PORT=18000
+```
+
+如果端口或服务器 IP 变化，可以覆盖：
+
+```bash
+SERVER_NAME=101.35.234.4 PUBLIC_PORT=18080 UPSTREAM_PORT=18000 \
+  sudo -E bash scripts/setup_nginx_reverse_proxy.sh
+```
+
+AutoDL 上开第一个终端启动 FastAPI：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+git pull origin main
+CORS_ALLOW_ORIGINS="*" PORT=8000 bash scripts/deploy_autodl_backend.sh
+```
+
+AutoDL 上开第二个终端启动反向隧道：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+bash scripts/start_autodl_reverse_tunnel.sh
+```
+
+默认隧道等价于：
+
+```bash
+ssh -N -R 127.0.0.1:18000:127.0.0.1:8000 root@101.35.234.4
+```
+
+如果云服务器 SSH 用户或端口不同：
+
+```bash
+CLOUD_USER=root CLOUD_HOST=101.35.234.4 SSH_PORT=22 \
+  bash scripts/start_autodl_reverse_tunnel.sh
+```
+
+测试顺序：
+
+```bash
+# AutoDL 上测试 FastAPI
+curl http://127.0.0.1:8000/health
+
+# 云服务器上测试隧道
+curl http://127.0.0.1:18000/health
+
+# 本机或浏览器测试公网入口
+curl http://101.35.234.4:18080/health
+```
+
+前端 API base URL 填：
+
+```text
+http://101.35.234.4:18080
+```
+
 脚本会使用 AutoDL 自带的 Miniconda 创建或复用 conda 环境：
 
 ```bash
