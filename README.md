@@ -462,6 +462,25 @@ conda run -n torch1 python scripts/demo_video_overlay.py --video path\to\video.m
 conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --camera --camera-index 0 --no-output --skip-audio --max-seconds 0
 ```
 
+摄像头模式如需同时输入麦克风音频，先在本机环境安装采集依赖：
+
+```powershell
+conda run -n torch1 python -m pip install sounddevice
+```
+
+然后加 `--mic`，demo 会每次请求前录一小段 WAV，和当前视频帧一起发给服务器：
+
+```powershell
+conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --camera --camera-index 0 --mic --no-output --max-seconds 0 --infer-every-seconds 5 --audio-segment-seconds 3
+```
+
+如果有多个麦克风，先列出设备，再用 `--mic-device` 指定：
+
+```powershell
+conda run -n torch1 python scripts/demo_service_overlay.py --list-audio-devices
+conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --camera --camera-index 0 --mic --mic-device 1 --no-output --max-seconds 0
+```
+
 用视频文件同时测试服务端人脸和语音接口：
 
 ```powershell

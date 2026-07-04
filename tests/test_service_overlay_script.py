@@ -6,11 +6,14 @@ import numpy as np
 
 from scripts.demo_service_overlay import (
     DEFAULT_API_BASE,
+    build_audio_status,
     build_companion_url,
     build_multipart_form,
+    build_parser,
     build_service_overlay_lines,
     encode_frame_as_jpeg,
     extract_predictions,
+    pcm_float32_to_wav_bytes,
     truncate_reply,
 )
 
@@ -71,6 +74,48 @@ def test_encode_frame_as_jpeg_returns_uploadable_bytes():
 
     assert encoded.startswith(b"\xff\xd8")
     assert encoded.endswith(b"\xff\xd9")
+
+
+def test_pcm_float32_to_wav_bytes_returns_uploadable_wav():
+    samples = np.zeros((1600, 1), dtype=np.float32)
+
+    wav_bytes = pcm_float32_to_wav_bytes(samples, sample_rate=16000)
+
+    assert wav_bytes.startswith(b"RIFF")
+    assert b"WAVE" in wav_bytes[:16]
+
+
+def test_audio_status_distinguishes_camera_mic_mode():
+    assert (
+        build_audio_status(is_camera=True, skip_audio=False, use_mic=False)
+        == "camera mic disabled; use --mic"
+    )
+    assert build_audio_status(is_camera=True, skip_audio=False, use_mic=True) == "mic chunks enabled"
+    assert build_audio_status(is_camera=False, skip_audio=False, use_mic=False) == (
+        "video audio chunks enabled"
+    )
+    assert build_audio_status(is_camera=True, skip_audio=True, use_mic=True) == "skipped"
+
+
+def test_service_overlay_parser_supports_microphone_options():
+    args = build_parser().parse_args(
+        [
+            "--camera",
+            "--mic",
+            "--mic-device",
+            "1",
+            "--mic-sample-rate",
+            "16000",
+            "--mic-channels",
+            "1",
+        ]
+    )
+
+    assert args.camera is True
+    assert args.mic is True
+    assert args.mic_device == "1"
+    assert args.mic_sample_rate == 16000
+    assert args.mic_channels == 1
 
 
 def test_build_multipart_form_contains_text_and_image_parts():

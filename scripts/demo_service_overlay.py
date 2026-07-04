@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import wave
 import uuid
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,8 @@ DEFAULT_INFER_EVERY_SECONDS = 3.0
 DEFAULT_AUDIO_SEGMENT_SECONDS = 3.0
 DEFAULT_MAX_SECONDS = 20.0
 DEFAULT_TIMEOUT_SECONDS = 120.0
+DEFAULT_MIC_SAMPLE_RATE = 16000
+DEFAULT_MIC_CHANNELS = 1
 
 
 def build_companion_url(api_base: str) -> str:
@@ -91,6 +95,77 @@ def encode_frame_as_jpeg(frame, *, quality: int = 88) -> bytes:
     if not ok:
         raise RuntimeError("Cannot encode frame as JPEG.")
     return encoded.tobytes()
+
+
+def pcm_float32_to_wav_bytes(audio: Any, *, sample_rate: int) -> bytes:
+    import numpy as np
+
+    samples = np.asarray(audio, dtype=np.float32)
+    if samples.ndim == 1:
+        channels = 1
+    elif samples.ndim == 2:
+        channels = int(samples.shape[1])
+    else:
+        raise ValueError(f"Expected mono or multi-channel audio, got shape {samples.shape!r}.")
+
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm.tobytes())
+    return output.getvalue()
+
+
+def record_microphone_audio_to_wav(
+    *,
+    duration_seconds: float,
+    sample_rate: int = DEFAULT_MIC_SAMPLE_RATE,
+    channels: int = DEFAULT_MIC_CHANNELS,
+    device: str | None = None,
+) -> bytes:
+    if duration_seconds <= 0:
+        raise ValueError("Microphone duration must be greater than 0.")
+
+    try:
+        import sounddevice as sd
+    except ImportError as exc:
+        raise RuntimeError(
+            "sounddevice is required for microphone capture. "
+            "Install it with: python -m pip install sounddevice"
+        ) from exc
+
+    frames = max(1, int(round(duration_seconds * sample_rate)))
+    audio = sd.rec(
+        frames,
+        samplerate=sample_rate,
+        channels=channels,
+        dtype="float32",
+        device=device,
+    )
+    sd.wait()
+    return pcm_float32_to_wav_bytes(audio, sample_rate=sample_rate)
+
+
+def list_audio_devices() -> str:
+    try:
+        import sounddevice as sd
+    except ImportError as exc:
+        raise RuntimeError(
+            "sounddevice is required to list microphone devices. "
+            "Install it with: python -m pip install sounddevice"
+        ) from exc
+
+    return str(sd.query_devices())
+
+
+def build_audio_status(*, is_camera: bool, skip_audio: bool, use_mic: bool) -> str:
+    if skip_audio:
+        return "skipped"
+    if is_camera:
+        return "mic chunks enabled" if use_mic else "camera mic disabled; use --mic"
+    return "video audio chunks enabled"
 
 
 def build_multipart_form(
@@ -221,6 +296,10 @@ def run_service_overlay(
     infer_every_seconds: float = DEFAULT_INFER_EVERY_SECONDS,
     max_seconds: float | None = DEFAULT_MAX_SECONDS,
     skip_audio: bool = False,
+    use_mic: bool = False,
+    mic_device: str | None = None,
+    mic_sample_rate: int = DEFAULT_MIC_SAMPLE_RATE,
+    mic_channels: int = DEFAULT_MIC_CHANNELS,
     audio_segment_seconds: float = DEFAULT_AUDIO_SEGMENT_SECONDS,
     save_output: bool = True,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -256,9 +335,11 @@ def run_service_overlay(
             cap.release()
             raise RuntimeError(f"Cannot create output video: {output_video_path}")
 
-    audio_status = "camera mic not captured" if is_camera else "audio chunks enabled"
-    if skip_audio:
-        audio_status = "skipped"
+    audio_status = build_audio_status(
+        is_camera=is_camera,
+        skip_audio=skip_audio,
+        use_mic=use_mic,
+    )
     last_face_prediction = None
     last_audio_prediction = None
     last_fusion_prediction = None
@@ -307,7 +388,14 @@ def run_service_overlay(
                     try:
                         image_jpeg = encode_frame_as_jpeg(frame)
                         audio_wav = None
-                        if not is_camera and not skip_audio:
+                        if is_camera and use_mic and not skip_audio:
+                            audio_wav = record_microphone_audio_to_wav(
+                                duration_seconds=audio_segment_seconds,
+                                sample_rate=mic_sample_rate,
+                                channels=mic_channels,
+                                device=mic_device,
+                            )
+                        elif not is_camera and not skip_audio:
                             wav_path = temp_dir_path / f"audio_{frame_index}.wav"
                             audio_wav = extract_video_audio_segment_to_wav(
                                 video_path,
@@ -400,6 +488,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-index", type=int, default=DEFAULT_CAMERA_INDEX)
     parser.add_argument("--infer-every-seconds", type=float, default=DEFAULT_INFER_EVERY_SECONDS)
     parser.add_argument("--audio-segment-seconds", type=float, default=DEFAULT_AUDIO_SEGMENT_SECONDS)
+    parser.add_argument("--mic", action="store_true", help="Capture microphone audio in camera mode.")
+    parser.add_argument("--mic-device", default=None, help="Optional sounddevice input device id/name.")
+    parser.add_argument("--mic-sample-rate", type=int, default=DEFAULT_MIC_SAMPLE_RATE)
+    parser.add_argument("--mic-channels", type=int, default=DEFAULT_MIC_CHANNELS)
+    parser.add_argument("--list-audio-devices", action="store_true")
     parser.add_argument(
         "--max-seconds",
         type=float,
@@ -415,6 +508,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.list_audio_devices:
+        try:
+            print(list_audio_devices())
+            return 0
+        except Exception as exc:  # noqa: BLE001 - demo script should show readable errors.
+            print(
+                json.dumps(
+                    {"ok": False, "error": type(exc).__name__, "message": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 1
+
     max_seconds = None if args.max_seconds == 0 else args.max_seconds
     camera_index = args.camera_index if args.camera else None
     try:
@@ -428,6 +535,10 @@ def main() -> int:
             infer_every_seconds=args.infer_every_seconds,
             max_seconds=max_seconds,
             skip_audio=args.skip_audio,
+            use_mic=args.mic,
+            mic_device=args.mic_device,
+            mic_sample_rate=args.mic_sample_rate,
+            mic_channels=args.mic_channels,
             audio_segment_seconds=args.audio_segment_seconds,
             save_output=not args.no_output,
             timeout_seconds=args.timeout_seconds,
