@@ -3,12 +3,15 @@ from __future__ import annotations
 import numpy as np
 
 from scripts.demo_video_overlay import (
+    DEFAULT_CAMERA_INDEX,
     DEFAULT_OUTPUT_VIDEO_PATH,
     DEFAULT_VIDEO_PATH,
     build_overlay_lines,
+    build_parser,
     draw_status,
     fuse_overlay_predictions,
     format_prediction_text,
+    resolve_capture_source,
     should_refresh_prediction,
 )
 
@@ -20,6 +23,32 @@ def test_overlay_demo_defaults_to_downloaded_omg_video():
         "xfsvvbTlR38.mp4",
     )
     assert DEFAULT_OUTPUT_VIDEO_PATH.name == "xfsvvbTlR38_emotion_overlay.mp4"
+
+
+def test_resolve_capture_source_uses_video_by_default():
+    source, label, is_camera = resolve_capture_source(DEFAULT_VIDEO_PATH, None)
+
+    assert source == str(DEFAULT_VIDEO_PATH)
+    assert label == str(DEFAULT_VIDEO_PATH)
+    assert is_camera is False
+
+
+def test_resolve_capture_source_uses_camera_index():
+    source, label, is_camera = resolve_capture_source(DEFAULT_VIDEO_PATH, 2)
+
+    assert source == 2
+    assert label == "camera:2"
+    assert is_camera is True
+
+
+def test_overlay_parser_supports_camera_mode():
+    args = build_parser().parse_args(
+        ["--camera", "--camera-index", "1", "--no-output", "--max-seconds", "0"]
+    )
+
+    assert args.camera is True
+    assert args.camera_index == 1
+    assert args.no_output is True
 
 
 def test_format_prediction_text_includes_label_and_confidence():

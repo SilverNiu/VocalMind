@@ -23,9 +23,19 @@ DEFAULT_OUTPUT_VIDEO_PATH = (
     PROJECT_ROOT / "tmp" / "omg_emotion_sample" / "xfsvvbTlR38_emotion_overlay.mp4"
 )
 DEFAULT_AUDIO_WAV_PATH = PROJECT_ROOT / "tmp" / "omg_emotion_sample" / "xfsvvbTlR38_audio.wav"
+DEFAULT_CAMERA_INDEX = 0
 DEFAULT_INFER_EVERY_SECONDS = 1.0
 DEFAULT_MAX_SECONDS = 20.0
 DEFAULT_AUDIO_MAX_SECONDS = 20.0
+
+
+def resolve_capture_source(
+    video_path: Path,
+    camera_index: int | None,
+) -> tuple[str | int, str, bool]:
+    if camera_index is None:
+        return str(video_path), str(video_path), False
+    return int(camera_index), f"camera:{int(camera_index)}", True
 
 
 def format_prediction_text(prediction: dict[str, object] | None) -> str:
@@ -200,38 +210,51 @@ def run_overlay(
     video_path: Path,
     output_video_path: Path,
     *,
+    camera_index: int | None = None,
     display: bool = True,
     infer_every_seconds: float = DEFAULT_INFER_EVERY_SECONDS,
     max_seconds: float | None = DEFAULT_MAX_SECONDS,
     skip_audio: bool = False,
+    save_output: bool = True,
     audio_wav_path: Path = DEFAULT_AUDIO_WAV_PATH,
     audio_max_seconds: float | None = DEFAULT_AUDIO_MAX_SECONDS,
 ) -> dict[str, object]:
     import cv2
 
-    if not video_path.exists():
+    capture_source, source_label, is_camera = resolve_capture_source(video_path, camera_index)
+    if not is_camera and not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    cap = cv2.VideoCapture(str(video_path))
+    if is_camera and sys.platform.startswith("win") and hasattr(cv2, "CAP_DSHOW"):
+        cap = cv2.VideoCapture(capture_source, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(capture_source)
     if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video_path}")
+        raise RuntimeError(f"Cannot open capture source: {source_label}")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    pending_frame = None
     if width <= 0 or height <= 0:
-        raise RuntimeError(f"Cannot read video dimensions: {video_path}")
+        ok, pending_frame = cap.read()
+        if not ok or pending_frame is None:
+            cap.release()
+            raise RuntimeError(f"Cannot read first frame from: {source_label}")
+        height, width = pending_frame.shape[:2]
 
-    output_video_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(
-        str(output_video_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height),
-    )
-    if not writer.isOpened():
-        cap.release()
-        raise RuntimeError(f"Cannot create output video: {output_video_path}")
+    writer = None
+    if save_output:
+        output_video_path.parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(
+            str(output_video_path),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height),
+        )
+        if not writer.isOpened():
+            cap.release()
+            raise RuntimeError(f"Cannot create output video: {output_video_path}")
 
     config = AppConfig.from_env()
     recognizer = EmotiEffFaceRecognizer(
@@ -243,7 +266,9 @@ def run_overlay(
     )
     audio_prediction = None
     audio_status = "skipped" if skip_audio else "preparing..."
-    if not skip_audio:
+    if is_camera and not skip_audio:
+        audio_status = "camera mode: skipped"
+    elif not skip_audio:
         try:
             audio_prediction = predict_video_audio(
                 video_path,
@@ -272,9 +297,13 @@ def run_overlay(
             if max_frames is not None and frame_index >= max_frames:
                 break
 
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                break
+            if pending_frame is not None:
+                frame = pending_frame
+                pending_frame = None
+            else:
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    break
 
             if should_refresh_prediction(frame_index, fps, infer_every_seconds):
                 second = frame_index / fps
@@ -326,7 +355,8 @@ def run_overlay(
                     )
 
             annotated = draw_status(frame, last_lines)
-            writer.write(annotated)
+            if writer is not None:
+                writer.write(annotated)
 
             if display:
                 cv2.imshow("VocalMind Emotion Overlay", annotated)
@@ -336,14 +366,17 @@ def run_overlay(
             frame_index += 1
     finally:
         cap.release()
-        writer.release()
+        if writer is not None:
+            writer.release()
         if display:
             cv2.destroyAllWindows()
 
     return {
         "ok": True,
-        "video": str(video_path),
-        "output_video": str(output_video_path),
+        "source": source_label,
+        "camera": is_camera,
+        "video": str(video_path) if not is_camera else None,
+        "output_video": str(output_video_path) if save_output else None,
         "frames_processed": frame_index,
         "audio_prediction": audio_prediction,
         "audio_status": audio_status,
@@ -353,10 +386,16 @@ def run_overlay(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Open a video and overlay detected face emotion on the video."
+        description="Open a video file or webcam and overlay detected emotions."
     )
     parser.add_argument("--video", type=Path, default=DEFAULT_VIDEO_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_VIDEO_PATH)
+    parser.add_argument(
+        "--camera",
+        action="store_true",
+        help="Open the local webcam instead of a video file.",
+    )
+    parser.add_argument("--camera-index", type=int, default=DEFAULT_CAMERA_INDEX)
     parser.add_argument("--infer-every-seconds", type=float, default=DEFAULT_INFER_EVERY_SECONDS)
     parser.add_argument("--audio-wav", type=Path, default=DEFAULT_AUDIO_WAV_PATH)
     parser.add_argument(
@@ -377,6 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Save the annotated video without opening an OpenCV window.",
     )
     parser.add_argument(
+        "--no-output",
+        action="store_true",
+        help="Do not save an annotated mp4; useful for webcam-only testing.",
+    )
+    parser.add_argument(
         "--skip-audio",
         action="store_true",
         help="Run face-only overlay without extracting or classifying video audio.",
@@ -388,14 +432,17 @@ def main() -> int:
     args = build_parser().parse_args()
     max_seconds = None if args.max_seconds == 0 else args.max_seconds
     audio_max_seconds = None if args.audio_max_seconds == 0 else args.audio_max_seconds
+    camera_index = args.camera_index if args.camera else None
     try:
         result = run_overlay(
             args.video,
             args.output,
+            camera_index=camera_index,
             display=not args.no_display,
             infer_every_seconds=args.infer_every_seconds,
             max_seconds=max_seconds,
             skip_audio=args.skip_audio,
+            save_output=not args.no_output,
             audio_wav_path=args.audio_wav,
             audio_max_seconds=audio_max_seconds,
         )

@@ -394,3 +394,15 @@ conda run -n torch1 python scripts/demo_video_overlay.py --no-display --max-seco
 ```powershell
 conda run -n torch1 python scripts/demo_video_overlay.py --no-display --max-seconds 20 --skip-audio
 ```
+
+本机打开电脑摄像头做实时视频通话效果测试：
+
+```powershell
+conda run -n torch1 python scripts/demo_video_overlay.py --camera --camera-index 0 --no-output --skip-audio --max-seconds 0
+```
+
+摄像头窗口中按 `q` 退出。摄像头模式用于验证实时画面和人脸情绪叠加；视频文件模式仍可用 `--video path\to\video.mp4` 同时测试视频画面和视频音轨情绪：
+
+```powershell
+conda run -n torch1 python scripts/demo_video_overlay.py --video path\to\video.mp4 --max-seconds 20 --audio-max-seconds 20
+```
