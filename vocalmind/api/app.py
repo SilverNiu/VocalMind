@@ -130,7 +130,18 @@ def minicpm_voice_config() -> dict[str, object]:
             "websocket_path": f"/voice/minicpm?mode={MINICPM_LOCAL_AGENT_MODE}",
             "mode": MINICPM_LOCAL_AGENT_MODE,
             "script": "scripts/local_minicpm_agent.py",
-            "description": "Local Python agent captures camera and microphone instead of browser media APIs.",
+            "description": (
+                "Local Python agent captures camera and microphone instead of browser "
+                "media APIs, and uploads sampled media to server-side emotion models."
+            ),
+            "emotion_sampling": {
+                "enabled": True,
+                "endpoint": "/companion/respond",
+                "inference": "server",
+                "disable_flag": "--no-emotion-sampling",
+                "recommended_interval_seconds": 3.0,
+                "audio_segment_seconds": 3.0,
+            },
         },
         "input_audio": {
             "sample_rate": MINICPM_INPUT_SAMPLE_RATE,
@@ -245,6 +256,7 @@ async def companion_respond_endpoint(
     audio_confidence: Optional[float] = Form(None),
     face_label: Optional[str] = Form(None),
     face_confidence: Optional[float] = Form(None),
+    request_reply: bool = Form(True),
 ) -> dict[str, object]:
     audio = (
         await _predict_audio_upload(audio_file)
@@ -257,7 +269,12 @@ async def companion_respond_endpoint(
         else _prediction_from_form("face", face_label, face_confidence)
     )
 
-    response_payload = _build_companion_response(user_text, audio, face, request_reply=True)
+    response_payload = _build_companion_response(
+        user_text,
+        audio,
+        face,
+        request_reply=request_reply,
+    )
     request_meta = _frontend_request_meta(request)
     if request_meta:
         response_payload["request_meta"] = request_meta
