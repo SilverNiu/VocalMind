@@ -406,3 +406,27 @@ conda run -n torch1 python scripts/demo_video_overlay.py --camera --camera-index
 ```powershell
 conda run -n torch1 python scripts/demo_video_overlay.py --video path\to\video.mp4 --max-seconds 20 --audio-max-seconds 20
 ```
+
+如果后端已经部署到服务器，本机 demo 推荐只做采集和展示，情绪识别全部调用服务：
+
+```powershell
+conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --camera --camera-index 0 --no-output --skip-audio --max-seconds 0
+```
+
+用视频文件同时测试服务端人脸和语音接口：
+
+```powershell
+conda run -n torch1 python scripts/demo_service_overlay.py --api-base http://101.35.234.4:18080 --video path\to\video.mp4 --max-seconds 20 --infer-every-seconds 3 --audio-segment-seconds 3
+```
+
+前端实时视频通话建议：
+
+```text
+1. getUserMedia({ video: true, audio: true }) 获取摄像头和麦克风。
+2. 每 1-2 秒从 video canvas 截一帧，作为 image_file 上传。
+3. 用 MediaRecorder 或 AudioWorklet 每 3-5 秒生成一个音频片段，作为 audio_file 上传。
+4. 发送 multipart/form-data 到 POST /companion/respond，字段包括 user_text、image_file、audio_file。
+5. 前端展示 audio_emotion、face_emotion、fusion_emotion 和 reply。
+```
+
+当前后端接口是“分片上传文件”的准实时方案，不是 WebSocket 连续流。为了语音识别稳定，音频片段优先编码成 WAV；如果前端先用浏览器默认 `audio/webm`，需要确认服务器 FunASR 能解码，或后续在后端加 ffmpeg 转 WAV。
