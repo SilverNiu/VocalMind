@@ -57,13 +57,16 @@ build_frontend() {
   ensure_node
 
   cd "$FRONTEND_DIR"
-  "${NPM_CMD[@]}" ci
+  echo "Installing frontend dependencies in ${FRONTEND_DIR}."
+  "${NPM_CMD[@]}" ci --no-audit --no-fund
+  echo "Building frontend with VITE_API_BASE=${FRONTEND_API_BASE}."
   VITE_API_BASE="$FRONTEND_API_BASE" "${NPM_CMD[@]}" run build
 
   if [[ ! -f "$FRONTEND_DIR/dist/index.html" ]]; then
     echo "ERROR: frontend build did not create dist/index.html" >&2
     exit 1
   fi
+  echo "Frontend build ready: ${FRONTEND_DIR}/dist/index.html"
 }
 
 ensure_node() {
@@ -81,13 +84,17 @@ ensure_node() {
   if [[ -n "$conda_bin" ]]; then
     echo "npm is missing; installing Node.js into conda env '${CONDA_NODE_ENV}'."
     if "$conda_bin" env list | awk '{print $1}' | grep -qx "$CONDA_NODE_ENV"; then
-      "$conda_bin" install -y -n "$CONDA_NODE_ENV" -c conda-forge nodejs
+      "$conda_bin" install -y -n "$CONDA_NODE_ENV" -c conda-forge "nodejs>=20"
     else
-      "$conda_bin" create -y -n "$CONDA_NODE_ENV" -c conda-forge nodejs
+      "$conda_bin" create -y -n "$CONDA_NODE_ENV" -c conda-forge "nodejs>=20"
     fi
 
-    NPM_CMD=("$conda_bin" "run" "-n" "$CONDA_NODE_ENV" "npm")
-    if "${NPM_CMD[@]}" --version >/dev/null 2>&1; then
+    local node_env_prefix
+    node_env_prefix="$(conda_env_prefix "$conda_bin" "$CONDA_NODE_ENV")"
+    if [[ -n "$node_env_prefix" && -x "$node_env_prefix/bin/npm" && -x "$node_env_prefix/bin/node" ]]; then
+      NPM_CMD=("$node_env_prefix/bin/npm")
+      echo "Using Node.js: $("$node_env_prefix/bin/node" --version)"
+      echo "Using npm: $("${NPM_CMD[@]}" --version) at ${NPM_CMD[0]}"
       return
     fi
   fi
@@ -114,11 +121,19 @@ set_npm_cmd_from_path() {
   node_major="$(node -p "Number(process.versions.node.split('.')[0])" 2>/dev/null || echo 0)"
   if [[ "$node_major" =~ ^[0-9]+$ ]] && [[ "$node_major" -ge 18 ]]; then
     NPM_CMD=("npm")
+    echo "Using Node.js: $(node --version)"
+    echo "Using npm: $(npm --version) at $(command -v npm)"
     return 0
   fi
 
   echo "WARN: Node.js >= 18 is required for the frontend build; current major version is ${node_major}." >&2
   return 1
+}
+
+conda_env_prefix() {
+  local conda_bin="$1"
+  local env_name="$2"
+  "$conda_bin" env list | awk -v env="$env_name" '$1 == env {print $NF; exit}'
 }
 
 ensure_repo
