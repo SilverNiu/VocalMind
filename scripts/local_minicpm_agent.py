@@ -114,6 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--list-audio-devices", action="store_true")
     parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=None,
+        help="Optional JSON status file for the local launcher and frontend UI.",
+    )
+    parser.add_argument(
         "--max-seconds",
         type=float,
         default=0,
@@ -149,6 +155,7 @@ def build_run_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "emotion_every_seconds": args.emotion_every_seconds,
         "emotion_audio_segment_seconds": args.emotion_audio_segment_seconds,
         "emotion_timeout_seconds": args.emotion_timeout_seconds,
+        "status_file": args.status_file,
         "max_seconds": None if args.max_seconds == 0 else args.max_seconds,
         "ready_timeout_seconds": args.ready_timeout_seconds,
     }
@@ -281,11 +288,86 @@ def should_open_camera_capture(
     use_camera: bool,
     emotion_sampling: bool,
 ) -> bool:
-    return use_camera and (mode == "video" or emotion_sampling)
+    return use_camera and mode == "video"
 
 
 def should_send_video_frames_to_minicpm(mode: str) -> bool:
     return mode == "video"
+
+
+def append_minicpm_text_delta(stats: dict[str, Any], text: str) -> None:
+    messages = stats.setdefault("cpm_messages", [])
+    if not isinstance(messages, list):
+        messages = []
+        stats["cpm_messages"] = messages
+
+    if (
+        not messages
+        or not isinstance(messages[-1], dict)
+        or messages[-1].get("role") != "assistant"
+        or messages[-1].get("complete") is True
+    ):
+        messages.append(
+            {
+                "id": f"assistant-{len(messages) + 1}",
+                "role": "assistant",
+                "text": str(text),
+                "complete": False,
+            }
+        )
+        return
+
+    messages[-1]["text"] = f"{messages[-1].get('text', '')}{text}"
+    messages[-1]["complete"] = False
+
+
+def mark_last_minicpm_message_complete(stats: dict[str, Any]) -> None:
+    messages = stats.get("cpm_messages")
+    if not isinstance(messages, list) or not messages:
+        return
+    last = messages[-1]
+    if isinstance(last, dict) and last.get("role") == "assistant":
+        last["complete"] = True
+
+
+def build_status_snapshot(stats: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": bool(stats.get("ok", True)),
+        "running": bool(stats.get("running", True)),
+        "mode": stats.get("mode"),
+        "minicpm_connection": stats.get("minicpm_connection"),
+        "websocket_url": stats.get("websocket_url"),
+        "camera": stats.get("camera"),
+        "emotion_sampling": stats.get("emotion_sampling"),
+        "emotion_modalities": stats.get("emotion_modalities", []),
+        "audio_chunks_sent": stats.get("audio_chunks_sent", 0),
+        "video_frames_sent": stats.get("video_frames_sent", 0),
+        "text_events_received": stats.get("text_events_received", 0),
+        "audio_events_received": stats.get("audio_events_received", 0),
+        "emotion_frames_captured": stats.get("emotion_frames_captured", 0),
+        "emotion_requests_sent": stats.get("emotion_requests_sent", 0),
+        "emotion_errors": stats.get("emotion_errors", []),
+        "last_emotion_response": stats.get("last_emotion_response"),
+        "cpm_messages": stats.get("cpm_messages", []),
+        "errors": stats.get("errors", []),
+        "updated_at": time.time(),
+    }
+
+
+def write_status_snapshot(status_file: Path | None, stats: dict[str, Any]) -> None:
+    if status_file is None:
+        return
+
+    try:
+        status_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = status_file.with_name(f"{status_file.name}.tmp")
+        tmp_path.write_text(
+            json.dumps(build_status_snapshot(stats), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(status_file)
+    except Exception as exc:  # noqa: BLE001 - status reporting must not stop audio capture.
+        print(f"Status snapshot write failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def record_microphone_float32(
@@ -346,6 +428,7 @@ async def post_emotion_sample(
     audio_wav: bytes | None,
     timeout_seconds: float,
     stats: dict[str, Any],
+    status_file: Path | None = None,
 ) -> None:
     try:
         body = await asyncio.to_thread(
@@ -360,11 +443,13 @@ async def post_emotion_sample(
     except Exception as exc:  # noqa: BLE001 - background sampling should not stop MiniCPM.
         detail = f"{type(exc).__name__}: {exc}"
         stats["emotion_errors"].append(detail)
+        write_status_snapshot(status_file, stats)
         print(f"Emotion sample upload failed: {detail}", file=sys.stderr)
         return
 
     stats["emotion_requests_sent"] += 1
     stats["last_emotion_response"] = extract_predictions(body)
+    write_status_snapshot(status_file, stats)
 
 
 def connect_minicpm_websocket(websockets: Any, ws_url: str, *, headers: dict[str, str]) -> Any:
@@ -407,6 +492,7 @@ async def run_local_minicpm_agent(
     emotion_every_seconds: float = DEFAULT_EMOTION_EVERY_SECONDS,
     emotion_audio_segment_seconds: float = DEFAULT_EMOTION_AUDIO_SEGMENT_SECONDS,
     emotion_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    status_file: Path | None = None,
     max_seconds: float | None = None,
     ready_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
@@ -441,6 +527,7 @@ async def run_local_minicpm_agent(
     )
     stats: dict[str, Any] = {
         "ok": True,
+        "running": True,
         "api_base": api_base,
         "websocket_url": ws_url,
         "minicpm_connection": "direct" if direct_minicpm else "server_proxy",
@@ -451,13 +538,16 @@ async def run_local_minicpm_agent(
         "text_events_received": 0,
         "audio_events_received": 0,
         "emotion_sampling": emotion_sampling,
+        "emotion_modalities": ["audio", "face"] if mode == "video" else ["audio"],
         "emotion_frames_captured": 0,
         "emotion_requests_sent": 0,
         "emotion_errors": [],
         "last_emotion_response": None,
+        "cpm_messages": [],
         "session_init_sent": False,
         "errors": [],
     }
+    write_status_snapshot(status_file, stats)
 
     try:
         async with connect_minicpm_websocket(websockets, ws_url, headers=ws_headers) as ws:
@@ -470,6 +560,7 @@ async def run_local_minicpm_agent(
                     playback=playback,
                     output_sample_rate=output_sample_rate,
                     session_init=session_init,
+                    status_file=status_file,
                 )
             )
             await asyncio.wait_for(ready.wait(), timeout=ready_timeout_seconds)
@@ -543,6 +634,7 @@ async def run_local_minicpm_agent(
                             audio_wav=audio_wav,
                             timeout_seconds=emotion_timeout_seconds,
                             stats=stats,
+                            status_file=status_file,
                         )
                     )
                     emotion_tasks.add(task)
@@ -557,6 +649,8 @@ async def run_local_minicpm_agent(
             with contextlib_suppress_cancelled():
                 await receive_task
     finally:
+        stats["running"] = False
+        write_status_snapshot(status_file, stats)
         if camera is not None:
             camera.release()
 
@@ -571,6 +665,7 @@ async def _receive_minicpm_messages(
     playback: bool,
     output_sample_rate: int,
     session_init: dict[str, object] | None = None,
+    status_file: Path | None = None,
 ) -> None:
     async for raw in ws:
         if isinstance(raw, bytes):
@@ -585,12 +680,14 @@ async def _receive_minicpm_messages(
         event_type = message.get("type")
         if event_type == "proxy.ready":
             ready.set()
+            write_status_snapshot(status_file, stats)
             print(f"MiniCPM proxy ready (mode={message.get('mode', 'unknown')}).")
             continue
         if event_type == "proxy.error":
             detail = str(message.get("detail") or message.get("message") or "MiniCPM proxy error.")
             stats["errors"].append(detail)
             ready.set()
+            write_status_snapshot(status_file, stats)
             print(f"MiniCPM proxy error: {detail}", file=sys.stderr)
             return
         if event_type == "session.queued":
@@ -601,9 +698,11 @@ async def _receive_minicpm_messages(
                 await ws.send(json.dumps(session_init, ensure_ascii=False))
                 stats["session_init_sent"] = True
                 ready.set()
+                write_status_snapshot(status_file, stats)
             continue
         if event_type == "session.created":
             ready.set()
+            write_status_snapshot(status_file, stats)
             print("MiniCPM direct session ready.")
             continue
 
@@ -623,6 +722,8 @@ async def _receive_minicpm_messages(
             )
             if kind == "text" and text:
                 stats["text_events_received"] += 1
+                append_minicpm_text_delta(stats, str(text))
+                write_status_snapshot(status_file, stats)
                 print(str(text), end="", flush=True)
             if kind == "audio" and audio:
                 stats["audio_events_received"] += 1
@@ -633,6 +734,8 @@ async def _receive_minicpm_messages(
             continue
 
         if event_type == "response.done":
+            mark_last_minicpm_message_complete(stats)
+            write_status_snapshot(status_file, stats)
             print()
 
 

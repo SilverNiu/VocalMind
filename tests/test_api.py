@@ -119,6 +119,7 @@ def test_minicpm_voice_config_exposes_frontend_contract_without_key():
     assert body["local_agent"]["launcher"]["base_url"] == "http://127.0.0.1:18990"
     assert body["local_agent"]["launcher"]["start_path"] == "/start-minicpm-agent"
     assert body["local_agent"]["launcher"]["shutdown_path"] == "/shutdown"
+    assert body["local_agent"]["launcher"]["status_path"] == "/status"
     assert body["input_audio"]["sample_rate"] == 16000
     assert body["input_audio"]["encoding"] == "float32_pcm_base64"
     assert body["input_video"]["encoding"] == "jpeg_base64"

@@ -3,9 +3,11 @@ import { describe, it } from 'node:test';
 import {
   base64ToFloat32,
   buildMiniCpmWebSocketUrl,
+  fetchMiniCpmLocalAgentStatus,
   float32ToBase64,
   getMiniCpmLauncherShutdownUrl,
   getMiniCpmLauncherStartUrl,
+  getMiniCpmLauncherStatusUrl,
   getMiniCpmConfigUrl,
   shutdownMiniCpmLocalLauncher,
   startMiniCpmLocalAgent,
@@ -43,6 +45,7 @@ describe('local launcher helpers', () => {
     health_path: '/health',
     stop_path: '/stop-minicpm-agent',
     shutdown_path: '/shutdown',
+    status_path: '/status',
     script: 'scripts/local_agent_launcher.py',
   };
 
@@ -106,6 +109,42 @@ describe('local launcher helpers', () => {
     assert.equal(result.shutdown, true);
     assert.equal(requests[0].url, 'http://127.0.0.1:18990/shutdown');
     assert.equal(requests[0].init?.method, 'POST');
+  });
+
+  it('fetches the local agent status exposed by the launcher', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        ok: true,
+        running: true,
+        status: {
+          ok: true,
+          mode: 'video',
+          emotion_modalities: ['audio', 'face'],
+          cpm_messages: [
+            { id: 'assistant-1', role: 'assistant', text: '你好', complete: true },
+          ],
+          last_emotion_response: {
+            audio_emotion: { source: 'audio', label: 'calm', confidence: 0.8 },
+            face_emotion: { source: 'face', label: 'happy', confidence: 0.7 },
+            fusion_emotion: { source: 'fusion', label: 'relaxed', confidence: 0.75 },
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    assert.equal(getMiniCpmLauncherStatusUrl(launcher), 'http://127.0.0.1:18990/status');
+
+    const result = await fetchMiniCpmLocalAgentStatus(launcher, fetchImpl as typeof fetch);
+
+    assert.equal(requests[0].url, 'http://127.0.0.1:18990/status');
+    assert.equal(result.running, true);
+    assert.equal(result.status?.mode, 'video');
+    assert.equal(result.status?.last_emotion_response?.face_emotion?.label, 'happy');
   });
 });
 

@@ -18,6 +18,7 @@ export interface MiniCpmLocalLauncherContract {
   health_path: string;
   stop_path: string;
   shutdown_path?: string;
+  status_path?: string;
   script: string;
 }
 
@@ -88,12 +89,65 @@ export interface MiniCpmLauncherShutdownResponse {
   message?: string;
 }
 
+export interface MiniCpmTranscriptMessage {
+  id: string;
+  role: 'assistant' | 'system' | 'error';
+  text: string;
+  complete?: boolean;
+}
+
+export interface MiniCpmEmotionPrediction {
+  source?: string;
+  label?: string;
+  confidence?: number;
+  scores?: Record<string, number>;
+  evidence?: Record<string, string>;
+}
+
+export interface MiniCpmEmotionStatus {
+  audio_emotion?: MiniCpmEmotionPrediction | null;
+  face_emotion?: MiniCpmEmotionPrediction | null;
+  fusion_emotion?: MiniCpmEmotionPrediction | null;
+}
+
+export interface MiniCpmLocalAgentStatus {
+  ok: boolean;
+  running?: boolean;
+  mode?: 'audio' | 'video';
+  minicpm_connection?: 'direct' | 'server_proxy';
+  camera?: number | null;
+  emotion_sampling?: boolean;
+  emotion_modalities?: Array<'audio' | 'face'>;
+  audio_chunks_sent?: number;
+  video_frames_sent?: number;
+  emotion_frames_captured?: number;
+  emotion_requests_sent?: number;
+  emotion_errors?: string[];
+  last_emotion_response?: MiniCpmEmotionStatus | null;
+  cpm_messages?: MiniCpmTranscriptMessage[];
+  errors?: string[];
+}
+
+export interface MiniCpmLauncherStatusResponse {
+  ok: boolean;
+  running: boolean;
+  project_root?: string;
+  status_file?: string;
+  status?: MiniCpmLocalAgentStatus | null;
+  error?: string;
+  message?: string;
+}
+
 export function getMiniCpmLauncherStartUrl(launcher: MiniCpmLocalLauncherContract): string {
   return `${normalizeBaseUrl(launcher.base_url)}${launcher.start_path}`;
 }
 
 export function getMiniCpmLauncherShutdownUrl(launcher: MiniCpmLocalLauncherContract): string {
   return `${normalizeBaseUrl(launcher.base_url)}${launcher.shutdown_path || launcher.stop_path}`;
+}
+
+export function getMiniCpmLauncherStatusUrl(launcher: MiniCpmLocalLauncherContract): string {
+  return `${normalizeBaseUrl(launcher.base_url)}${launcher.status_path || '/status'}`;
 }
 
 export async function startMiniCpmLocalAgent(
@@ -141,6 +195,27 @@ export async function shutdownMiniCpmLocalLauncher(
   const data = await response.json() as MiniCpmLauncherShutdownResponse;
   if (!data.ok) {
     throw new Error(data.message || data.error || 'Local launcher failed to shut down.');
+  }
+  return data;
+}
+
+export async function fetchMiniCpmLocalAgentStatus(
+  launcher: MiniCpmLocalLauncherContract,
+  fetchImpl: typeof fetch = fetch
+): Promise<MiniCpmLauncherStatusResponse> {
+  const response = await fetchImpl(getMiniCpmLauncherStatusUrl(launcher), {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Local launcher status request failed: ${response.status}`);
+  }
+
+  const data = await response.json() as MiniCpmLauncherStatusResponse;
+  if (!data.ok) {
+    throw new Error(data.message || data.error || 'Local launcher status request failed.');
   }
   return data;
 }

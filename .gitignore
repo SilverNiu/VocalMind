@@ -24,6 +24,7 @@ runs/
 logs/
 tmp/
 temp/
+.vocalmind/
 
 # Local datasets and recordings
 data/

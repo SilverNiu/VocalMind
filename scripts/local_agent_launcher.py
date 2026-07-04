@@ -23,6 +23,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18990
 DEFAULT_MODE = "audio"
 AGENT_SCRIPT = Path("scripts") / "local_minicpm_agent.py"
+STATUS_DIR = ".vocalmind"
+STATUS_FILE_NAME = "local_minicpm_agent_status.json"
 SpawnFn = Callable[[list[str], Path], subprocess.Popen]
 
 
@@ -68,6 +70,24 @@ def _common_project_roots() -> list[Path]:
     return [candidate.resolve() for candidate in candidates]
 
 
+def default_status_file(project_root: Path) -> Path:
+    return project_root / STATUS_DIR / STATUS_FILE_NAME
+
+
+def read_agent_status(status_file: Path) -> dict[str, object] | None:
+    if not status_file.is_file():
+        return None
+    try:
+        parsed = json.loads(status_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "error": "status_file_invalid",
+            "message": str(exc),
+        }
+    return parsed if isinstance(parsed, dict) else {"ok": False, "error": "status_file_invalid"}
+
+
 def build_agent_command(
     *,
     project_root: Path,
@@ -75,6 +95,7 @@ def build_agent_command(
     api_base: str,
     mode: str = DEFAULT_MODE,
     minicpm_realtime_url: str | None = DEFAULT_MINICPM_REALTIME_URL,
+    status_file: Path | None = None,
 ) -> list[str]:
     command = [
         python_executable,
@@ -86,6 +107,8 @@ def build_agent_command(
     ]
     if minicpm_realtime_url:
         command.extend(["--minicpm-realtime-url", minicpm_realtime_url])
+    if status_file is not None:
+        command.extend(["--status-file", str(status_file)])
     return command
 
 
@@ -135,7 +158,9 @@ class LauncherState:
                 api_base=api_base,
                 mode=mode,
                 minicpm_realtime_url=minicpm_realtime_url,
+                status_file=default_status_file(project_root),
             )
+            default_status_file(project_root).unlink(missing_ok=True)
             self.process = self.spawn(command, project_root)
             return {
                 "ok": True,
@@ -143,6 +168,7 @@ class LauncherState:
                 "already_running": False,
                 "pid": self.process.pid,
                 "project_root": str(project_root),
+                "status_file": str(default_status_file(project_root)),
                 "command": command,
             }
 
@@ -163,16 +189,29 @@ def make_handler(state: LauncherState, project_root: Path):
             self._send_json({"ok": True})
 
         def do_GET(self) -> None:
-            if self.path.split("?", 1)[0] != "/health":
-                self._send_json({"ok": False, "error": "not_found"}, status=404)
+            path = self.path.split("?", 1)[0]
+            if path == "/health":
+                self._send_json(
+                    {
+                        "ok": True,
+                        "running": state.is_running(),
+                        "project_root": str(project_root),
+                    }
+                )
                 return
-            self._send_json(
-                {
-                    "ok": True,
-                    "running": state.is_running(),
-                    "project_root": str(project_root),
-                }
-            )
+            if path == "/status":
+                status_file = default_status_file(project_root)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "running": state.is_running(),
+                        "project_root": str(project_root),
+                        "status_file": str(status_file),
+                        "status": read_agent_status(status_file),
+                    }
+                )
+                return
+            self._send_json({"ok": False, "error": "not_found"}, status=404)
 
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]

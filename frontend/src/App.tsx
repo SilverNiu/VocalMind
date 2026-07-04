@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { AppMode, InteractionState, EmotionState, HistoryRecord } from './types';
 import { TopNav } from './components/TopNav';
 import { HomeView } from './views/HomeView';
-import { InteractionView } from './views/InteractionView';
 import { HistoryView } from './views/HistoryView';
 import { ReportView } from './views/ReportView';
 import { MiniCpmVoiceView } from './views/MiniCpmVoiceView';
@@ -196,31 +195,13 @@ export default function App() {
 
           {(appMode === 'video' || appMode === 'audio') && (
             <motion.div 
-              key="interaction"
+              key={`minicpm-${appMode}`}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.05 }}
               className="w-full h-full"
             >
-              <InteractionView 
-                mode={appMode} 
-                state={interactionState} 
-                emotion={emotion} 
-                onEnd={handleInteractionEnd}
-                onStateChange={handleStateChange}
-              />
-            </motion.div>
-          )}
-
-          {appMode === 'minicpm' && (
-            <motion.div
-              key="minicpm"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.05 }}
-              className="w-full h-full"
-            >
-              <MiniCpmVoiceView onEnd={handleHome} />
+              <MiniCpmVoiceView mode={appMode} onEnd={handleInteractionEnd} />
             </motion.div>
           )}
 

@@ -1,4 +1,4 @@
-export type AppMode = 'home' | 'video' | 'audio' | 'minicpm' | 'history' | 'report';
+export type AppMode = 'home' | 'video' | 'audio' | 'history' | 'report';
 
 export type InteractionState = 
   | 'idle' 

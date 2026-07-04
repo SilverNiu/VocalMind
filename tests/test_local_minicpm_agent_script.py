@@ -7,12 +7,14 @@ import numpy as np
 
 from scripts.local_minicpm_agent import (
     _receive_minicpm_messages,
+    append_minicpm_text_delta,
     append_emotion_audio_chunk,
     build_input_append_message,
     build_minicpm_realtime_ws_url,
     build_minicpm_ws_url,
     build_parser,
     build_run_kwargs,
+    build_status_snapshot,
     base64_to_float32_samples,
     buffered_emotion_audio_duration_seconds,
     drain_emotion_audio_wav,
@@ -40,13 +42,22 @@ def test_local_minicpm_agent_defaults_to_audio_mode_with_camera_emotion_sampling
     assert kwargs["minicpm_realtime_url"] == "wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio"
 
 
-def test_audio_mode_keeps_camera_for_server_emotion_but_not_minicpm_video():
+def test_audio_mode_uses_audio_emotion_only_and_never_opens_camera():
     assert should_open_camera_capture(
         mode="audio",
         use_camera=True,
         emotion_sampling=True,
-    ) is True
+    ) is False
     assert should_send_video_frames_to_minicpm("audio") is False
+
+
+def test_video_mode_opens_camera_for_face_emotion_and_minicpm_frames():
+    assert should_open_camera_capture(
+        mode="video",
+        use_camera=True,
+        emotion_sampling=True,
+    ) is True
+    assert should_send_video_frames_to_minicpm("video") is True
 
 
 def test_local_minicpm_agent_can_run_audio_only():
@@ -65,6 +76,15 @@ def test_local_minicpm_agent_can_disable_server_emotion_sampling():
     kwargs = build_run_kwargs(args)
 
     assert kwargs["emotion_sampling"] is False
+
+
+def test_local_minicpm_agent_accepts_status_file_path(tmp_path):
+    status_file = tmp_path / "status.json"
+    args = build_parser().parse_args(["--status-file", str(status_file)])
+
+    kwargs = build_run_kwargs(args)
+
+    assert kwargs["status_file"] == status_file
 
 
 def test_build_minicpm_ws_url_uses_video_mode_query():
@@ -126,6 +146,39 @@ def test_emotion_audio_buffer_drains_float32_chunks_to_uploadable_wav():
     assert wav_bytes.startswith(b"RIFF")
     assert b"WAVE" in wav_bytes[:16]
     assert buffer == []
+
+
+def test_status_snapshot_exposes_cpm_messages_and_emotion_modalities():
+    stats = {
+        "ok": True,
+        "mode": "video",
+        "emotion_modalities": ["audio", "face"],
+        "cpm_messages": [{"id": "assistant-1", "role": "assistant", "text": "你好"}],
+        "last_emotion_response": {
+            "audio_emotion": {"source": "audio", "label": "calm", "confidence": 0.8},
+            "face_emotion": {"source": "face", "label": "happy", "confidence": 0.7},
+            "fusion_emotion": {"source": "fusion", "label": "relaxed", "confidence": 0.75},
+        },
+        "errors": [],
+    }
+
+    snapshot = build_status_snapshot(stats)
+
+    assert snapshot["mode"] == "video"
+    assert snapshot["emotion_modalities"] == ["audio", "face"]
+    assert snapshot["cpm_messages"][0]["text"] == "你好"
+    assert snapshot["last_emotion_response"]["face_emotion"]["label"] == "happy"
+
+
+def test_append_minicpm_text_delta_groups_assistant_response():
+    stats = {}
+
+    append_minicpm_text_delta(stats, "你")
+    append_minicpm_text_delta(stats, "好")
+
+    assert stats["cpm_messages"] == [
+        {"id": "assistant-1", "role": "assistant", "text": "你好", "complete": False}
+    ]
 
 
 def test_receive_minicpm_messages_stops_after_proxy_error():
