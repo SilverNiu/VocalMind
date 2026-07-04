@@ -27,6 +27,7 @@ class Emotion2VecAudioRecognizer:
         hub: str = "ms",
         extract_embedding: bool = False,
         modelscope_cache_dir: str | Path | None = None,
+        disable_update: bool = True,
     ) -> None:
         if modelscope_cache_dir is not None:
             cache_dir = Path(modelscope_cache_dir).resolve()
@@ -43,7 +44,7 @@ class Emotion2VecAudioRecognizer:
 
         self.model_id = model_id
         self.extract_embedding = extract_embedding
-        self.model = AutoModel(model=model_id, hub=hub)
+        self.model = AutoModel(model=model_id, hub=hub, disable_update=disable_update)
 
     def predict_file(self, wav_path: str | Path) -> EmotionPrediction:
         validate_audio_file(wav_path)

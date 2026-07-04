@@ -39,4 +39,8 @@ def test_audio_recognizer_forces_modelscope_cache_to_local_models(monkeypatch, t
     )
 
     assert os.environ["MODELSCOPE_CACHE"] == str(tmp_path)
-    assert created["kwargs"] == {"model": "iic/emotion2vec_plus_large", "hub": "ms"}
+    assert created["kwargs"] == {
+        "model": "iic/emotion2vec_plus_large",
+        "hub": "ms",
+        "disable_update": True,
+    }

@@ -157,7 +157,7 @@ curl -X POST http://127.0.0.1:8000/companion/respond `
 
 ## A 同学模型说明
 
-- 语音：`vocalmind.audio.Emotion2VecAudioRecognizer` 使用 FunASR `AutoModel(model="iic/emotion2vec_plus_large", hub="ms")`，并强制 `MODELSCOPE_CACHE` 指向 `local_models/modelscope`。普通 `pytest` 只测解析和 API mock，不会下载大模型。
+- 语音：`vocalmind.audio.Emotion2VecAudioRecognizer` 使用 FunASR `AutoModel(model="iic/emotion2vec_plus_large", hub="ms", disable_update=True)`，并强制 `MODELSCOPE_CACHE` 指向 `local_models/modelscope`。普通 `pytest` 只测解析和 API mock，不会下载大模型。
 - 人脸：`vocalmind.face.EmotiEffFaceRecognizer` 默认走 EmotiEffLib ONNX + `mbf_va_mtl`，新增人脸检测/裁剪步骤，并强制从 `FACE_MODEL_DIR` 读取本地模型，不再写用户目录缓存。若图片没有检测到人脸，API 返回明确 JSON 错误。
 - 融合：`vocalmind.fusion.fuse_emotions` 按 `AUDIO_WEIGHT/FACE_WEIGHT` 归一化加权；缺少某一模态时会自动重归一。
 - LLM：`vocalmind.llm.CompanionLLM` 遵守陪伴边界，只做倾听、情绪支持和一般建议，不做医学诊断；无 key 或本地缺 OpenAI SDK 时使用 fallback。
