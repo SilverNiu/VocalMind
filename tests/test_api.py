@@ -42,6 +42,15 @@ def test_health_endpoint_returns_ok():
     assert response.json() == {"status": "ok"}
 
 
+def test_health_endpoint_allows_browser_frontend_origin():
+    client = TestClient(app)
+
+    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
 def test_fusion_endpoint_returns_fused_prediction():
     client = TestClient(app)
 

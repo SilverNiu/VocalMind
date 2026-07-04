@@ -197,3 +197,106 @@ git remote add gitee https://gitee.com/hongwei_33/VocalMind.git
 ```
 
 如果本机 `git` 不在 PATH，可先安装 Git for Windows，或把 Git 可执行文件加入 PATH。推送到 GitHub 通常需要浏览器登录、GitHub CLI 登录，或 personal access token。
+
+## AutoDL 后端部署
+
+目标目录使用 `/root/autodl-tmp`，后端默认监听 `0.0.0.0:8000`。第一次在 AutoDL 终端执行：
+
+```bash
+cd /root/autodl-tmp
+git clone https://github.com/SilverNiu/VocalMind.git
+cd VocalMind
+bash scripts/deploy_autodl_backend.sh
+```
+
+如果仓库已经存在，直接执行脚本会自动拉取 `origin/main`：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+bash scripts/deploy_autodl_backend.sh
+```
+
+常用覆盖参数：
+
+```bash
+cd /root/autodl-tmp/VocalMind
+CORS_ALLOW_ORIGINS="*" PORT=8000 bash scripts/deploy_autodl_backend.sh
+```
+
+如需指定 AutoDL 上的 Python 环境：
+
+```bash
+PYTHON_BIN=/root/miniconda3/envs/torch1/bin/python bash scripts/deploy_autodl_backend.sh
+```
+
+如需提前下载语音模型到项目本地目录，而不是用户 home 缓存：
+
+```bash
+DOWNLOAD_AUDIO_MODEL=1 bash scripts/deploy_autodl_backend.sh
+```
+
+脚本会写入 `/root/autodl-tmp/VocalMind/.env.autodl`，并把模型路径固定到：
+
+```text
+/root/autodl-tmp/VocalMind/local_models/modelscope
+/root/autodl-tmp/VocalMind/local_models/face/affectnet_emotions/onnx/mbf_va_mtl.onnx
+```
+
+不要把个人 LLM key 写进 git。需要远程 LLM 时，在启动前临时设置：
+
+```bash
+export LLM_API_KEY="your-key"
+export LLM_BASE_URL="https://api-inference.modelscope.cn/v1/"
+export LLM_MODEL_ID="deepseek-ai/DeepSeek-V4-Flash"
+bash scripts/deploy_autodl_backend.sh
+```
+
+为了节省 request，也可以不设置 `LLM_API_KEY`，`/companion/respond` 会使用本地 fallback 回复。
+
+AutoDL 控制台需要把容器内 `8000` 端口开放为公网服务。前端把 API base URL 配成 AutoDL 给出的公网地址即可，例如：
+
+```text
+https://xxxxxx.autodl.com
+```
+
+可用接口：
+
+```text
+GET  /health
+POST /emotion/audio
+POST /emotion/face
+POST /emotion/fusion
+POST /companion/respond
+```
+
+前端推荐优先调用 `/companion/respond`。不上传文件、只传已有情绪结果的测试命令：
+
+```bash
+curl -X POST http://127.0.0.1:8000/companion/respond \
+  -F "user_text=I feel stuck today." \
+  -F "audio_label=sad" \
+  -F "audio_confidence=0.8" \
+  -F "face_label=neutral" \
+  -F "face_confidence=0.6"
+```
+
+上传音频和图片的测试命令：
+
+```bash
+curl -X POST http://127.0.0.1:8000/companion/respond \
+  -F "user_text=Please respond based on my emotion." \
+  -F "audio_file=@/root/autodl-tmp/test.wav" \
+  -F "image_file=@/root/autodl-tmp/test.jpg"
+```
+
+本机继续跑视频叠加 demo：
+
+```powershell
+conda run -n torch1 python scripts/demo_video_overlay.py --no-display --max-seconds 20 --audio-max-seconds 20
+```
+
+如果本机显存或页面文件不足，可先跳过语音确认人脸链路：
+
+```powershell
+conda run -n torch1 python scripts/demo_video_overlay.py --no-display --max-seconds 20 --skip-audio
+```

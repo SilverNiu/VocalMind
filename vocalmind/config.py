@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CORS_ALLOW_ORIGINS = ["*"]
+
+
+def _parse_csv_env(value: str | None, default: list[str]) -> list[str]:
+    if value is None:
+        return list(default)
+
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or list(default)
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,9 @@ class AppConfig:
     modelscope_cache_dir: Path = PROJECT_ROOT / "local_models" / "modelscope"
     face_model_dir: Path = PROJECT_ROOT / "local_models" / "face" / "affectnet_emotions"
     emotiefflib_path: Path = PROJECT_ROOT / "EmotiEffLib-main" / "EmotiEffLib-main"
+    cors_allow_origins: list[str] = field(
+        default_factory=lambda: list(DEFAULT_CORS_ALLOW_ORIGINS)
+    )
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -47,6 +59,10 @@ class AppConfig:
             ),
             emotiefflib_path=Path(
                 os.getenv("EMOTIEFFLIB_PATH", str(cls.emotiefflib_path))
+            ),
+            cors_allow_origins=_parse_csv_env(
+                os.getenv("CORS_ALLOW_ORIGINS"),
+                DEFAULT_CORS_ALLOW_ORIGINS,
             ),
         )
 

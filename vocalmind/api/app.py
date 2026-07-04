@@ -17,6 +17,7 @@ from vocalmind.schema import EmotionPrediction
 
 try:
     from fastapi import FastAPI, File, Form, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 except ImportError as exc:  # pragma: no cover - import-time guidance for optional dependency
     raise RuntimeError(
@@ -26,6 +27,13 @@ except ImportError as exc:  # pragma: no cover - import-time guidance for option
 
 app = FastAPI(title="VocalMind Emotion Companion Baseline")
 config = AppConfig.from_env()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.cors_allow_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(VocalMindError)
