@@ -151,10 +151,13 @@ validate_web_root() {
 write_nginx_config() {
   local conf_path
   local enabled_path=""
-  if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
+  if [[ -d /www/server/panel/vhost/nginx ]]; then
+    conf_path="/www/server/panel/vhost/nginx/${SITE_NAME}.conf"
+  elif [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
     conf_path="/etc/nginx/sites-available/${SITE_NAME}"
     enabled_path="/etc/nginx/sites-enabled/${SITE_NAME}"
   else
+    $SUDO mkdir -p /etc/nginx/conf.d
     conf_path="/etc/nginx/conf.d/${SITE_NAME}.conf"
   fi
 

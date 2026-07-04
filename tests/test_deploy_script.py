@@ -101,6 +101,8 @@ def test_cloud_frontend_deploy_serves_static_frontend_and_proxies_api():
     assert "validate_web_root" in script
     assert "refusing to replace unsafe WEB_ROOT" in script
     assert "$SUDO cp -a \"$PROJECT_DIR/frontend/dist/.\" \"$WEB_ROOT/\"" in script
+    assert "/www/server/panel/vhost/nginx/${SITE_NAME}.conf" in script
+    assert "$SUDO mkdir -p /etc/nginx/conf.d" in script
     assert "root ${WEB_ROOT};" in script
     assert "try_files \\$uri \\$uri/ /index.html;" in script
     assert "location = /voice/minicpm" in script
