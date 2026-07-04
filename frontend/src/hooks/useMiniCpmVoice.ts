@@ -3,6 +3,7 @@ import { getBackendConfig } from '../lib/backendClient';
 import {
   fetchMiniCpmConfig,
   MiniCpmConfig,
+  shutdownMiniCpmLocalLauncher,
   startMiniCpmLocalAgent,
 } from '../lib/minicpmClient';
 
@@ -33,13 +34,21 @@ export function useMiniCpmVoice() {
   const [config, setConfig] = useState<MiniCpmConfig | null>(null);
   const [agentCommand, setAgentCommand] = useState<string | null>(null);
 
-  const stop = useCallback((_closeSocket = true) => {
+  const stop = useCallback(async (closeLauncher = true) => {
+    const launcher = config?.local_agent?.launcher;
+    if (closeLauncher && launcher) {
+      try {
+        await shutdownMiniCpmLocalLauncher(launcher);
+      } catch {
+        // The launcher may already be closed; ending the view should still reset local UI state.
+      }
+    }
     setStatus('idle');
     setInputLevel(0.35);
-  }, []);
+  }, [config]);
 
   const start = useCallback(async () => {
-    stop(false);
+    await stop(false);
     setStatus('connecting');
     setLines([
       {

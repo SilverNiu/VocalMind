@@ -149,6 +149,7 @@ def minicpm_voice_config() -> dict[str, object]:
                 "start_path": "/start-minicpm-agent",
                 "health_path": "/health",
                 "stop_path": "/stop-minicpm-agent",
+                "shutdown_path": "/shutdown",
                 "script": "scripts/local_agent_launcher.py",
             },
         },

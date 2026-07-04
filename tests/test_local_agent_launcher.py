@@ -108,3 +108,36 @@ def test_launcher_options_allows_private_network_preflight(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_launcher_shutdown_endpoint_stops_http_server(tmp_path):
+    project_root = tmp_path / "VocalMind"
+    scripts_dir = project_root / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "local_minicpm_agent.py").write_text("# agent", encoding="utf-8")
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        make_handler(LauncherState(), project_root),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/shutdown",
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+        with urlopen(request, timeout=3) as response:
+            body = response.read().decode("utf-8")
+            assert response.status == 200
+            assert '"shutdown": true' in body
+
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+    finally:
+        if thread.is_alive():
+            server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)

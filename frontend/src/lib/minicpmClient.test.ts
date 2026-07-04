@@ -4,8 +4,10 @@ import {
   base64ToFloat32,
   buildMiniCpmWebSocketUrl,
   float32ToBase64,
+  getMiniCpmLauncherShutdownUrl,
   getMiniCpmLauncherStartUrl,
   getMiniCpmConfigUrl,
+  shutdownMiniCpmLocalLauncher,
   startMiniCpmLocalAgent,
 } from './minicpmClient';
 
@@ -40,6 +42,7 @@ describe('local launcher helpers', () => {
     start_path: '/start-minicpm-agent',
     health_path: '/health',
     stop_path: '/stop-minicpm-agent',
+    shutdown_path: '/shutdown',
     script: 'scripts/local_agent_launcher.py',
   };
 
@@ -81,6 +84,28 @@ describe('local launcher helpers', () => {
         minicpm_realtime_url: 'wss://minicpmo45.modelbest.cn/v1/realtime?mode=audio',
       })
     );
+  });
+
+  it('posts to the local launcher shutdown endpoint when ending the session', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({ ok: true, shutdown: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    assert.equal(
+      getMiniCpmLauncherShutdownUrl(launcher),
+      'http://127.0.0.1:18990/shutdown'
+    );
+
+    const result = await shutdownMiniCpmLocalLauncher(launcher, fetchImpl as typeof fetch);
+
+    assert.equal(result.shutdown, true);
+    assert.equal(requests[0].url, 'http://127.0.0.1:18990/shutdown');
+    assert.equal(requests[0].init?.method, 'POST');
   });
 });
 

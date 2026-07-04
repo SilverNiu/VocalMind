@@ -28,8 +28,8 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
     stop,
   } = useMiniCpmVoice();
 
-  const handleEnd = () => {
-    stop(true);
+  const handleEnd = async () => {
+    await stop(true);
     onEnd();
   };
 
@@ -105,7 +105,7 @@ export function MiniCpmVoiceView({ onEnd }: MiniCpmVoiceViewProps) {
               Start Agent
             </button>
             <button
-              onClick={handleEnd}
+              onClick={() => void handleEnd()}
               className="h-12 px-6 rounded-full bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-500 font-medium transition-colors flex items-center gap-2"
             >
               <PhoneOff className="w-5 h-5" />

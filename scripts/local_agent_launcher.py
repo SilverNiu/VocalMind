@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Callable
 
 
@@ -191,6 +191,17 @@ def make_handler(state: LauncherState, project_root: Path):
                     return
                 if path == "/stop-minicpm-agent":
                     self._send_json(state.stop_agent())
+                    return
+                if path == "/shutdown":
+                    agent_result = state.stop_agent()
+                    self._send_json(
+                        {
+                            "ok": True,
+                            "shutdown": True,
+                            "agent": agent_result,
+                        }
+                    )
+                    Thread(target=self.server.shutdown, daemon=True).start()
                     return
             except Exception as exc:  # noqa: BLE001 - launcher should return readable JSON.
                 self._send_json(

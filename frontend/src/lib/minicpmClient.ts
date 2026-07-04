@@ -17,6 +17,7 @@ export interface MiniCpmLocalLauncherContract {
   start_path: string;
   health_path: string;
   stop_path: string;
+  shutdown_path?: string;
   script: string;
 }
 
@@ -80,8 +81,19 @@ export interface MiniCpmLauncherStartResponse {
   message?: string;
 }
 
+export interface MiniCpmLauncherShutdownResponse {
+  ok: boolean;
+  shutdown?: boolean;
+  error?: string;
+  message?: string;
+}
+
 export function getMiniCpmLauncherStartUrl(launcher: MiniCpmLocalLauncherContract): string {
   return `${normalizeBaseUrl(launcher.base_url)}${launcher.start_path}`;
+}
+
+export function getMiniCpmLauncherShutdownUrl(launcher: MiniCpmLocalLauncherContract): string {
+  return `${normalizeBaseUrl(launcher.base_url)}${launcher.shutdown_path || launcher.stop_path}`;
 }
 
 export async function startMiniCpmLocalAgent(
@@ -105,6 +117,30 @@ export async function startMiniCpmLocalAgent(
   const data = await response.json() as MiniCpmLauncherStartResponse;
   if (!data.ok) {
     throw new Error(data.message || data.error || 'Local launcher failed to start agent.');
+  }
+  return data;
+}
+
+export async function shutdownMiniCpmLocalLauncher(
+  launcher: MiniCpmLocalLauncherContract,
+  fetchImpl: typeof fetch = fetch
+): Promise<MiniCpmLauncherShutdownResponse> {
+  const response = await fetchImpl(getMiniCpmLauncherShutdownUrl(launcher), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Local launcher shutdown request failed: ${response.status}`);
+  }
+
+  const data = await response.json() as MiniCpmLauncherShutdownResponse;
+  if (!data.ok) {
+    throw new Error(data.message || data.error || 'Local launcher failed to shut down.');
   }
   return data;
 }
