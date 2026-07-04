@@ -211,9 +211,13 @@ def post_companion(
     user_text: str,
     image_jpeg: bytes | None,
     audio_wav: bytes | None,
+    request_reply: bool = True,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    fields = {"user_text": user_text}
+    fields = {
+        "user_text": user_text,
+        "request_reply": "true" if request_reply else "false",
+    }
     files = {}
     if image_jpeg is not None:
         files["image_file"] = ("frame.jpg", image_jpeg, "image/jpeg")

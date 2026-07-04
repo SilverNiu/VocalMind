@@ -17,12 +17,18 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.demo_service_overlay import (  # noqa: E402
     DEFAULT_API_BASE,
+    DEFAULT_AUDIO_SEGMENT_SECONDS,
     DEFAULT_CAMERA_INDEX,
+    DEFAULT_INFER_EVERY_SECONDS,
     DEFAULT_MIC_CHANNELS,
     DEFAULT_MIC_SAMPLE_RATE,
     DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_USER_TEXT,
     encode_frame_as_jpeg,
+    extract_predictions,
     list_audio_devices,
+    pcm_float32_to_wav_bytes,
+    post_companion,
 )
 
 
@@ -31,6 +37,8 @@ DEFAULT_MINICPM_MODE = "video"
 DEFAULT_AUDIO_CHUNK_SECONDS = 0.24
 DEFAULT_VIDEO_FPS = 1.0
 DEFAULT_OUTPUT_SAMPLE_RATE = 24000
+DEFAULT_EMOTION_EVERY_SECONDS = DEFAULT_INFER_EVERY_SECONDS
+DEFAULT_EMOTION_AUDIO_SEGMENT_SECONDS = DEFAULT_AUDIO_SEGMENT_SECONDS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Run the VocalMind local MiniCPM agent. The agent captures local "
             "microphone audio and optional camera frames, then sends input.append "
-            "messages to the VocalMind MiniCPM proxy."
+            "messages to the VocalMind MiniCPM proxy and sampled media to the "
+            "server-side emotion models."
         )
     )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
@@ -55,6 +64,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-sample-rate", type=int, default=DEFAULT_OUTPUT_SAMPLE_RATE)
     parser.add_argument("--no-playback", action="store_true", help="Do not play MiniCPM audio.")
     parser.add_argument("--force-listen", action="store_true")
+    parser.add_argument(
+        "--no-emotion-sampling",
+        action="store_true",
+        help="Disable local media uploads to AutoDL face/audio emotion models.",
+    )
+    parser.add_argument("--emotion-user-text", default=DEFAULT_USER_TEXT)
+    parser.add_argument(
+        "--emotion-every-seconds",
+        type=float,
+        default=DEFAULT_EMOTION_EVERY_SECONDS,
+    )
+    parser.add_argument(
+        "--emotion-audio-segment-seconds",
+        type=float,
+        default=DEFAULT_EMOTION_AUDIO_SEGMENT_SECONDS,
+    )
+    parser.add_argument(
+        "--emotion-timeout-seconds",
+        type=float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+    )
     parser.add_argument("--list-audio-devices", action="store_true")
     parser.add_argument(
         "--max-seconds",
@@ -82,6 +112,11 @@ def build_run_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "output_sample_rate": args.output_sample_rate,
         "playback": not args.no_playback,
         "force_listen": args.force_listen,
+        "emotion_sampling": not args.no_emotion_sampling,
+        "emotion_user_text": args.emotion_user_text,
+        "emotion_every_seconds": args.emotion_every_seconds,
+        "emotion_audio_segment_seconds": args.emotion_audio_segment_seconds,
+        "emotion_timeout_seconds": args.emotion_timeout_seconds,
         "max_seconds": None if args.max_seconds == 0 else args.max_seconds,
         "ready_timeout_seconds": args.ready_timeout_seconds,
     }
@@ -126,6 +161,36 @@ def base64_to_float32_samples(value: str) -> Any:
     if byte_length <= 0:
         return np.asarray([], dtype=np.float32)
     return np.frombuffer(raw[:byte_length], dtype="<f4").astype(np.float32, copy=False)
+
+
+def append_emotion_audio_chunk(buffer: list[Any], samples: Any) -> None:
+    import numpy as np
+
+    array = np.asarray(samples, dtype=np.float32)
+    if array.ndim == 2:
+        array = array.mean(axis=1, dtype=np.float32)
+    if array.ndim != 1:
+        raise ValueError(f"Expected mono or multi-channel audio, got shape {array.shape!r}.")
+    if array.size:
+        buffer.append(array.astype(np.float32, copy=False))
+
+
+def buffered_emotion_audio_duration_seconds(buffer: list[Any], *, sample_rate: int) -> float:
+    if sample_rate <= 0:
+        raise ValueError("Sample rate must be greater than 0.")
+    return sum(len(chunk) for chunk in buffer) / float(sample_rate)
+
+
+def drain_emotion_audio_wav(buffer: list[Any], *, sample_rate: int) -> bytes:
+    import numpy as np
+
+    audio = (
+        np.concatenate(buffer).astype(np.float32, copy=False)
+        if buffer
+        else np.asarray([], dtype=np.float32)
+    )
+    buffer.clear()
+    return pcm_float32_to_wav_bytes(audio, sample_rate=sample_rate)
 
 
 def build_input_append_message(
@@ -179,12 +244,47 @@ def open_camera_capture(camera_index: int):
     return cap
 
 
-def capture_camera_frame_base64(cap: Any, *, jpeg_quality: int) -> str | None:
+def capture_camera_frame_jpeg(cap: Any, *, jpeg_quality: int) -> bytes | None:
     ok, frame = cap.read()
     if not ok or frame is None:
         return None
-    jpeg = encode_frame_as_jpeg(frame, quality=jpeg_quality)
+    return encode_frame_as_jpeg(frame, quality=jpeg_quality)
+
+
+def capture_camera_frame_base64(cap: Any, *, jpeg_quality: int) -> str | None:
+    jpeg = capture_camera_frame_jpeg(cap, jpeg_quality=jpeg_quality)
+    if jpeg is None:
+        return None
     return base64.b64encode(jpeg).decode("ascii")
+
+
+async def post_emotion_sample(
+    *,
+    api_base: str,
+    user_text: str,
+    image_jpeg: bytes | None,
+    audio_wav: bytes | None,
+    timeout_seconds: float,
+    stats: dict[str, Any],
+) -> None:
+    try:
+        body = await asyncio.to_thread(
+            post_companion,
+            api_base=api_base,
+            user_text=user_text,
+            image_jpeg=image_jpeg,
+            audio_wav=audio_wav,
+            request_reply=False,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001 - background sampling should not stop MiniCPM.
+        detail = f"{type(exc).__name__}: {exc}"
+        stats["emotion_errors"].append(detail)
+        print(f"Emotion sample upload failed: {detail}", file=sys.stderr)
+        return
+
+    stats["emotion_requests_sent"] += 1
+    stats["last_emotion_response"] = extract_predictions(body)
 
 
 async def run_local_minicpm_agent(
@@ -203,6 +303,11 @@ async def run_local_minicpm_agent(
     output_sample_rate: int = DEFAULT_OUTPUT_SAMPLE_RATE,
     playback: bool = True,
     force_listen: bool = False,
+    emotion_sampling: bool = True,
+    emotion_user_text: str = DEFAULT_USER_TEXT,
+    emotion_every_seconds: float = DEFAULT_EMOTION_EVERY_SECONDS,
+    emotion_audio_segment_seconds: float = DEFAULT_EMOTION_AUDIO_SEGMENT_SECONDS,
+    emotion_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     max_seconds: float | None = None,
     ready_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
@@ -226,6 +331,10 @@ async def run_local_minicpm_agent(
         "video_frames_sent": 0,
         "text_events_received": 0,
         "audio_events_received": 0,
+        "emotion_sampling": emotion_sampling,
+        "emotion_requests_sent": 0,
+        "emotion_errors": [],
+        "last_emotion_response": None,
         "errors": [],
     }
 
@@ -248,6 +357,10 @@ async def run_local_minicpm_agent(
             start_time = time.monotonic()
             next_frame_time = 0.0
             frame_interval = 1.0 / max(camera_fps, 0.001)
+            next_emotion_time = start_time + max(emotion_every_seconds, 0.001)
+            emotion_audio_buffer: list[Any] = []
+            emotion_tasks: set[asyncio.Task[None]] = set()
+            last_emotion_frame_jpeg: bytes | None = None
 
             while max_seconds is None or time.monotonic() - start_time < max_seconds:
                 audio = await asyncio.to_thread(
@@ -257,16 +370,20 @@ async def run_local_minicpm_agent(
                     channels=mic_channels,
                     device=mic_device,
                 )
+                if emotion_sampling:
+                    append_emotion_audio_chunk(emotion_audio_buffer, audio)
+
                 video_frames: list[str] = []
                 now = time.monotonic()
                 if camera is not None and now >= next_frame_time:
-                    frame = await asyncio.to_thread(
-                        capture_camera_frame_base64,
+                    frame_jpeg = await asyncio.to_thread(
+                        capture_camera_frame_jpeg,
                         camera,
                         jpeg_quality=jpeg_quality,
                     )
-                    if frame:
-                        video_frames.append(frame)
+                    if frame_jpeg:
+                        last_emotion_frame_jpeg = frame_jpeg
+                        video_frames.append(base64.b64encode(frame_jpeg).decode("ascii"))
                         stats["video_frames_sent"] += 1
                     next_frame_time = now + frame_interval
 
@@ -281,7 +398,36 @@ async def run_local_minicpm_agent(
                 )
                 stats["audio_chunks_sent"] += 1
 
+                emotion_audio_seconds = buffered_emotion_audio_duration_seconds(
+                    emotion_audio_buffer,
+                    sample_rate=mic_sample_rate,
+                )
+                if (
+                    emotion_sampling
+                    and now >= next_emotion_time
+                    and emotion_audio_seconds >= emotion_audio_segment_seconds
+                ):
+                    audio_wav = drain_emotion_audio_wav(
+                        emotion_audio_buffer,
+                        sample_rate=mic_sample_rate,
+                    )
+                    task = asyncio.create_task(
+                        post_emotion_sample(
+                            api_base=api_base,
+                            user_text=emotion_user_text,
+                            image_jpeg=last_emotion_frame_jpeg,
+                            audio_wav=audio_wav,
+                            timeout_seconds=emotion_timeout_seconds,
+                            stats=stats,
+                        )
+                    )
+                    emotion_tasks.add(task)
+                    task.add_done_callback(emotion_tasks.discard)
+                    next_emotion_time = now + max(emotion_every_seconds, 0.001)
+
             await ws.send(json.dumps({"type": "proxy.close"}))
+            if emotion_tasks:
+                await asyncio.gather(*emotion_tasks, return_exceptions=True)
             receive_task.cancel()
             with contextlib_suppress_cancelled():
                 await receive_task
