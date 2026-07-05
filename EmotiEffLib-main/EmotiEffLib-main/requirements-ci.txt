@@ -1,4 +1,0 @@
-black==25.1.0
-isort
-pre-commit
-pylint
